@@ -1,0 +1,260 @@
+{% extends "base.html" %}
+{% block content %}
+
+<div id="receipt" class="receipt" hidden>
+  <div class="receipt-title" id="receipt-title"></div>
+  <div class="receipt-amt" id="receipt-amt"></div>
+  <div class="receipt-foot" id="receipt-foot"></div>
+</div>
+
+{% if request.args.get('sync') %}
+<div class="banner banner-ok">{{ request.args.get('sync') }}</div>
+{% endif %}
+{% if request.args.get('sync_error') %}
+<div class="banner banner-err">Sync failed: {{ request.args.get('sync_error') }}</div>
+{% endif %}
+
+<section class="cards">
+  <div class="card hero">
+    <div class="card-label">Total net profit</div>
+    <div class="card-value {{ 'pos' if summary.net_profit >= 0 else 'neg' }}">{{ summary.net_profit | money }}</div>
+    <div class="card-sub">{{ summary.sold_count }} item{{ '' if summary.sold_count == 1 else 's' }} sold · {{ summary.gross | money }} gross{% if summary.best %} · 🏆 best: {{ summary.best.name }} ({{ summary.best.net | money }}){% endif %}</div>
+  </div>
+  <div class="card">
+    <div class="card-label">Flips</div>
+    <div class="card-value {{ 'pos' if summary.flip_profit >= 0 else 'neg' }}">{{ summary.flip_profit | money }}</div>
+    <div class="card-sub">{{ summary.flip_count }} sold · {{ "%.0f" | format(summary.flip_roi * 100) }}% ROI</div>
+  </div>
+  <div class="card">
+    <div class="card-label">Declutter</div>
+    <div class="card-value {{ 'pos' if summary.declutter_profit >= 0 else 'neg' }}">{{ summary.declutter_profit | money }}</div>
+    <div class="card-sub">found money</div>
+  </div>
+  <div class="card">
+    <div class="card-label">Shipping profit</div>
+    <div class="card-value {{ 'pos' if summary.shipping_profit >= 0 else 'neg' }}">{{ summary.shipping_profit | money }}</div>
+    <div class="card-sub">the Pirate Ship spread</div>
+  </div>
+  <div class="card">
+    <div class="card-label">eBay fees</div>
+    <div class="card-value">{{ summary.fees | money }}</div>
+    <div class="card-sub">eBay's cut · {{ "%.1f" | format(summary.fees_pct * 100) }}% of gross</div>
+  </div>
+  <div class="card">
+    <div class="card-label">Pending</div>
+    <div class="card-value">{{ summary.pending_value | money }}</div>
+    <div class="card-sub">current bids/asks on {{ summary.listed_count }} listed · {{ summary.inventory_cost | money }} tied up</div>
+  </div>
+  <div class="card">
+    <div class="card-label">This month</div>
+    <div class="card-value {{ 'pos' if summary.month_net >= 0 else 'neg' }}">{{ summary.month_net | money }}</div>
+    <div class="card-sub">{{ summary.month_count }} sold so far</div>
+  </div>
+</section>
+
+<details class="panel" id="chart-panel" hidden>
+  <summary>Monthly net profit</summary>
+  <div class="chart-wrap"><canvas id="monthly-chart"></canvas></div>
+</details>
+
+<section class="panel">
+  <h2>Items</h2>
+  {% if items %}
+  <div class="table-wrap">
+  <table id="items-table">
+    <thead>
+      <tr>
+        <th>Item</th><th>Type</th><th>Ends</th>
+        <th class="num cost-th">Cost</th><th class="num">Sale</th>
+        <th class="num">ShpChg</th><th class="num">ShpCst</th>
+        <th class="num">Fees</th><th class="num">Net$</th><th class="num">Net%</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for it in items %}
+      <tr data-s0="{{ it.name | lower }}"
+          data-s1="{{ it.source }}"
+          data-s2="{{ ('z' + it.date_sold) if it.status == 'sold' else (it.listing_end or '9999') }}"
+          data-s3="{{ it.cost_basis }}"
+          data-s4="{{ it.sale_price if it.status == 'sold' else (it.listing_price if it.listing_price else '') }}"
+          data-s5="{{ it.shipping_charged if it.status == 'sold' else '' }}"
+          data-s6="{{ it.label_cost if it.status == 'sold' else '' }}"
+          data-s7="{{ it.ebay_fees if it.status == 'sold' else (it.fees_est if it.fees_est else '') }}"
+          data-s8="{{ it.net_profit if it.net_profit is not none else (it.net_est if it.net_est is not none else '') }}"
+          data-s9="{{ it.roi if it.roi is not none else '' }}">
+        <td class="item-name"><a class="item-link" href="{{ url_for('edit', item_id=it.id) }}" title="{{ it.notes or 'edit details' }}">{{ it.name }}</a></td>
+        <td class="src-cell"><span style="color: var(--{{ 'flip' if it.source == 'flip' else 'tape' }})" title="{{ 'Flip — bought to resell' if it.source == 'flip' else 'Bye — decluttering, found money' }}">{{ 'FLIP' if it.source == 'flip' else 'BYE' }}</span></td>
+        <td>
+          {%- if it.status == 'sold' -%}
+            <span class="badge st-sold" title="sold {{ it.date_sold }}">{{ it.sold_label }}</span>
+          {%- elif it.ends_label -%}
+            <span class="badge st-listed" title="auction ends">{{ it.ends_label }}</span>
+          {%- else -%}
+            <span class="badge st-{{ it.status | replace(' ', '-') }}">{{ it.status }}</span>
+          {%- endif -%}
+        </td>
+        <td class="num cost-cell">
+          <form method="post" action="{{ url_for('set_cost', item_id=it.id) }}" class="cost-form">
+            <span class="cost-display" title="click to edit — >0 marks it a flip">{{ '—' if it.source == 'declutter' else (it.cost_basis | money) }}</span>
+            <input class="cost-input" name="cost_basis" type="number" step="0.01" min="0"
+                   value="{{ '%.2f' | format(it.cost_basis) }}" aria-label="cost basis"
+                   title="enter to save, esc to cancel" hidden>
+            <button class="cost-edit" type="button" title="edit cost">✎</button>
+          </form>
+        </td>
+        <td class="num">
+          {%- if it.status == 'sold' -%}
+            {{ it.sale_price | money }}
+          {%- elif it.listing_price -%}
+            <span class="asking" title="current asking price on eBay">{{ it.listing_price | money }}</span>
+          {%- else -%}—{%- endif -%}
+        </td>
+        <td class="num">{{ (it.shipping_charged if it.status == 'sold' else None) | money }}</td>
+        <td class="num">{{ (it.label_cost if it.status == 'sold' else None) | money }}</td>
+        <td class="num">
+          {%- if it.status == 'sold' -%}
+            {{ it.ebay_fees | money }}
+          {%- elif it.fees_est -%}
+            <span class="asking" title="estimated — real fee lands at sync, and runs higher since eBay also takes a cut of shipping and tax">{{ it.fees_est | money }}</span>
+          {%- else -%}—{%- endif -%}
+        </td>
+        <td class="num {{ '' if it.net_profit is none else ('pos' if it.net_profit >= 0 else 'neg') }}">
+          {%- if it.net_profit is not none -%}
+            {{ it.net_profit | money }}
+          {%- elif it.net_est is not none -%}
+            <span class="asking {{ 'neg' if it.net_est < 0 }}" title="estimated: current price − cost − estimated fees; shipping assumed a wash until the real label cost exists">{{ it.net_est | money }}</span>
+          {%- else -%}—{%- endif -%}
+        </td>
+        <td class="num">
+          {%- if it.roi is none -%}—
+          {%- elif it.status == 'sold' -%}
+            <span class="{{ 'pos' if it.roi >= 0 else 'neg' }}" title="return on cost">{{ '%.0f' | format(it.roi * 100) }}%</span>
+          {%- else -%}
+            <span class="asking {{ 'neg' if it.roi < 0 }}" title="estimated return on cost">{{ '%.0f' | format(it.roi * 100) }}%</span>
+          {%- endif -%}
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  </div>
+  {% else %}
+  <p class="empty">Nothing tracked yet. Go dig something out of the closet — <a href="{{ url_for('add') }}">add your first item</a> and let's see what it's worth.</p>
+  {% endif %}
+</section>
+
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4"></script>
+<script src="https://cdn.jsdelivr.net/npm/canvas-confetti@1"></script>
+<script>
+  const monthly = {{ monthly_json | safe }};
+  if (monthly.length && window.Chart) {
+    const panel = document.getElementById('chart-panel');
+    panel.hidden = false;
+    let chart;
+    panel.addEventListener('toggle', () => {
+      if (!panel.open || chart) return;
+      const css = getComputedStyle(document.documentElement);
+      const GREEN = css.getPropertyValue('--green').trim();
+      const RED = css.getPropertyValue('--red').trim();
+      const MUTED = css.getPropertyValue('--muted').trim();
+      chart = new Chart(document.getElementById('monthly-chart'), {
+      type: 'bar',
+      data: {
+        labels: monthly.map(m => m.label),
+        datasets: [{
+          label: 'Net profit',
+          data: monthly.map(m => m.net),
+          backgroundColor: monthly.map(m => m.net >= 0 ? GREEN : RED),
+          borderRadius: 0,
+          maxBarThickness: 64,
+        }]
+      },
+      options: {
+        maintainAspectRatio: false,
+        plugins: {
+          legend: { display: false },
+          tooltip: {
+            callbacks: {
+              afterLabel: ctx => {
+                const m = monthly[ctx.dataIndex];
+                return `${m.count} sold · $${m.gross.toFixed(2)} gross`;
+              }
+            }
+          }
+        },
+        scales: {
+          x: { ticks: { color: MUTED, font: { family: 'IBM Plex Mono' } }, grid: { display: false } },
+          y: { ticks: { color: MUTED, font: { family: 'IBM Plex Mono' }, callback: v => '$' + v }, grid: { color: 'rgba(128,128,128,.15)' } }
+        }
+      }
+      });
+    });
+  }
+
+  // inline cost editing: currency display swaps to an input; enter saves, esc cancels
+  document.querySelectorAll('.cost-form').forEach(f => {
+    const disp = f.querySelector('.cost-display');
+    const inp = f.querySelector('.cost-input');
+    const open = () => { disp.hidden = true; inp.hidden = false; inp.focus(); inp.select(); };
+    const close = () => { inp.hidden = true; disp.hidden = false; };
+    f.querySelector('.cost-edit').addEventListener('click', open);
+    disp.addEventListener('click', open);
+    inp.addEventListener('keydown', e => { if (e.key === 'Escape') close(); });
+    inp.addEventListener('blur', close);
+  });
+
+  // column sorting: click any header; default = Ends ascending (soonest first, sold after)
+  const tbl = document.getElementById('items-table');
+  if (tbl) {
+    const headers = [...tbl.querySelectorAll('thead th')];
+    const numeric = [3, 4, 5, 6, 7, 8, 9];
+    let cur = 2, dir = 1;
+    const apply = () => {
+      const tb = tbl.tBodies[0];
+      [...tb.rows].sort((a, b) => {
+        let x = a.dataset['s' + cur], y = b.dataset['s' + cur];
+        if (numeric.includes(cur)) {
+          x = x === '' ? null : parseFloat(x);
+          y = y === '' ? null : parseFloat(y);
+          if (x === null && y === null) return 0;
+          if (x === null) return 1;   // blanks sink regardless of direction
+          if (y === null) return -1;
+          return (x - y) * dir;
+        }
+        return x.localeCompare(y) * dir;
+      }).forEach(r => tb.appendChild(r));
+      headers.forEach((h, i) => {
+        h.classList.remove('sort-asc', 'sort-desc');
+        if (i === cur) h.classList.add(dir === 1 ? 'sort-asc' : 'sort-desc');
+      });
+    };
+    headers.forEach((h, i) => h.addEventListener('click', () => {
+      dir = (cur === i) ? -dir : 1;
+      cur = i;
+      apply();
+    }));
+    apply();
+  }
+
+  // the cha-ching receipt: fires once when an item is marked sold
+  const params = new URLSearchParams(location.search);
+  if (params.has('chaching')) {
+    const amt = parseFloat(params.get('chaching')) || 0;
+    const won = amt >= 0;
+    document.getElementById('receipt-title').textContent = won ? '*** CHA-CHING ***' : '*** SOLD (AT A LOSS) ***';
+    document.getElementById('receipt-amt').textContent = (won ? '+' : '−') + '$' + Math.abs(amt).toFixed(2);
+    document.getElementById('receipt-foot').textContent = won ? 'ANOTHER ONE OUT THE DOOR' : 'IT HAPPENS. ONWARD.';
+    const r = document.getElementById('receipt');
+    r.hidden = false;
+    const reduceMotion = matchMedia('(prefers-reduced-motion: reduce)').matches;
+    if (won && window.confetti && !reduceMotion) {
+      confetti({ particleCount: 130, spread: 75, origin: { y: 0.2 } });
+    }
+    setTimeout(() => {
+      r.classList.add('receipt-out');
+      setTimeout(() => { r.hidden = true; }, 400);
+    }, 4200);
+    history.replaceState(null, '', location.pathname);
+  }
+</script>
+{% endblock %}

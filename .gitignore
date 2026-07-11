@@ -1,0 +1,13 @@
+# binaries
+byecli/byecli
+
+# python leftovers
+__pycache__/
+.venv/
+
+# local data (lives in ~/.local/share/byecli anyway)
+*.db
+*.db-shm
+*.db-wal
+
+.DS_Store

@@ -1,0 +1,40 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{% block title %}eBay Tracker{% endblock %}</title>
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>📦</text></svg>">
+  <script>
+    // set theme before first paint to avoid a flash
+    document.documentElement.dataset.theme =
+      localStorage.getItem("theme") ||
+      (matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light");
+  </script>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body>
+  <header class="topbar">
+    <a class="brand" href="{{ url_for('index') }}">EBAY-TRACKER</a>
+    <div class="topbar-actions">
+      <button id="theme-toggle" class="btn btn-icon" type="button" aria-label="Switch phosphor color" title="Switch phosphor: green/amber">◐</button>
+      <form method="post" action="{{ url_for('sync') }}" id="sync-form">
+        <button class="btn btn-primary" type="submit" title="Pull listings, sales, and fees from eBay">⟳ Sync eBay</button>
+      </form>
+    </div>
+  </header>
+  <main>
+    {% block content %}{% endblock %}
+  </main>
+  <script>
+    document.getElementById("theme-toggle").addEventListener("click", () => {
+      const el = document.documentElement;
+      el.dataset.theme = el.dataset.theme === "dark" ? "light" : "dark";
+      localStorage.setItem("theme", el.dataset.theme);
+    });
+  </script>
+</body>
+</html>
