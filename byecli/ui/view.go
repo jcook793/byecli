@@ -172,6 +172,12 @@ func (m *Model) View() string {
 		}
 	case modeCost:
 		full = m.overlayCentered(full, m.costPanel())
+	case modeSettings:
+		if m.cfg != nil {
+			full = m.overlayCentered(full, m.settingsPanel())
+		}
+	case modeAuth:
+		full = m.overlayCentered(full, m.authPanel())
 	}
 	return full
 }
@@ -413,13 +419,17 @@ func (m *Model) overlayCentered(base, panel string) string {
 
 // ── overlays ─────────────────────────────────────────────────────────────
 
-// keyLine renders "key description" pairs — blue keys, muted words — used by
-// the footer and the overlay hint lines so they all speak the same dialect.
-// When the key is the first letter of its description ("s sync"), the letter
-// is highlighted in place ("sync" with a blue s) instead of shown separately.
+// keyLine renders "key description" pairs — the hotkey as a chip (phosphor-
+// dark text punched into blue, inverse-video legible), the words muted —
+// used by the footer and the overlay hint lines so they all speak the same
+// dialect. When the key is the first letter of its description ("s sync"),
+// the letter is chipped in place ("sync" with a chipped s); otherwise the
+// chip sits a space ahead of the words. Chips carry the visual rhythm, so
+// pairs need no separator beyond plain gaps.
 func (m *Model) keyLine(pairs [][2]string) string {
-	mut := fg(m.pal().muted)
-	key := fg(cBlue)
+	p := m.pal()
+	mut := fg(p.muted)
+	key := lipgloss.NewStyle().Foreground(lipgloss.Color(p.bg)).Background(cBlue).Bold(true)
 	var parts []string
 	for _, kv := range pairs {
 		k, desc := kv[0], kv[1]
@@ -429,7 +439,7 @@ func (m *Model) keyLine(pairs [][2]string) string {
 			parts = append(parts, key.Render(k)+" "+mut.Render(desc))
 		}
 	}
-	return strings.Join(parts, mut.Render("  · "))
+	return strings.Join(parts, "  ")
 }
 
 func (m *Model) panelStyle() lipgloss.Style {
@@ -557,6 +567,153 @@ func (m *Model) costPanel() string {
 		title, sub, "", m.costInput.View(), "", hint}, "\n"))
 }
 
+func (m *Model) settingsPanel() string {
+	p := m.pal()
+	mut := fg(p.muted)
+	ink := fg(p.ink)
+
+	const valW = 46
+	var lines []string
+	section := ""
+	for i, f := range settingFields {
+		if f.section != section {
+			if section != "" {
+				lines = append(lines, "")
+			}
+			section = f.section
+			lines = append(lines, mut.Bold(true).Render(strings.ToUpper(section)))
+		}
+		label := "  " + f.label
+		if i == m.setCursor {
+			label = "▸ " + f.label
+		}
+		var val string
+		switch {
+		case i == m.setCursor && m.setEditing:
+			val = m.setInput.View()
+		default:
+			v := f.get(m.cfg)
+			switch {
+			case v == "":
+				val = mut.Render(padCell(f.empty, valW, false))
+			case f.secret: // secrets stay fully hidden, length and all
+				val = ink.Render(padCell("••••••••••••", valW, false))
+			default:
+				val = ink.Render(padCell(v, valW, false))
+			}
+		}
+		labelSt := mut
+		if i == m.setCursor {
+			labelSt = fg(p.bright)
+		}
+		lines = append(lines, labelSt.Render(padCell(label, 18, false))+val)
+	}
+
+	title := fg(p.bright).Bold(true).Render("SETTINGS")
+	sub := mut.Render(core.ConfigPath())
+	var hint string
+	if m.setEditing {
+		hint = m.keyLine([][2]string{{"enter", "save"}, {"esc", "cancel"}})
+	} else {
+		pairs := [][2]string{{"enter", "edit"}, {"a", "authorize ebay"}}
+		if settingFields[m.setCursor].section == "easypost" {
+			pairs = append(pairs, [2]string{"o", "open api keys page"})
+		}
+		hint = m.keyLine(append(pairs, [2]string{"esc", "close"}))
+	}
+	return m.panelStyle().Render(title + "\n" + sub + "\n\n" +
+		strings.Join(lines, "\n") + "\n\n" + hint)
+}
+
+// wrapChunks hard-wraps s into w-rune lines (consent URLs run long).
+func wrapChunks(s string, w int) []string {
+	var out []string
+	r := []rune(s)
+	for len(r) > w {
+		out = append(out, string(r[:w]))
+		r = r[w:]
+	}
+	return append(out, string(r))
+}
+
+// authIntroPanel is the checklist shown before any browser opens: what an
+// eBay developer account involves, with live ✓/✗ for the config prereqs.
+func (m *Model) authIntroPanel() string {
+	p := m.pal()
+	mut := fg(p.muted)
+	ink := fg(p.ink)
+	keysOK := m.cfg.Ebay.ClientID != "" && m.cfg.Ebay.ClientSecret != ""
+	ruOK := m.cfg.Ebay.RuName != ""
+	mark := func(ok bool) string {
+		if ok {
+			return fg(cGreen).Render("✓ ")
+		}
+		return fg(cRed).Render("✗ ")
+	}
+
+	lines := []string{
+		fg(p.bright).Bold(true).Render("AUTHORIZE EBAY"),
+		"",
+		ink.Render("Syncing needs a refresh token, which needs a (free) eBay"),
+		ink.Render("developer account. One-time setup, all on developer.ebay.com:"),
+		"",
+		mut.Render("· 1. Join the developer program (approval can take a day)."),
+		mut.Render("· 2. Take the \"I do not persist eBay data\" exemption on the"),
+		mut.Render("     Marketplace Account Deletion page — production keys stay"),
+		mut.Render("     disabled until you do."),
+		mark(keysOK) + ink.Render("3. Application Keys page: App ID → client_id, Cert ID →"),
+		ink.Render("     client_secret, both into settings."),
+		mark(ruOK) + ink.Render("4. User Tokens → Get a Token via Your Application → OAuth:"),
+		ink.Render("     add a redirect URL (any HTTPS URL, it can 404) and put"),
+		ink.Render("     the generated RuName into ru_name."),
+		"",
+	}
+	if keysOK && ruOK {
+		lines = append(lines,
+			ink.Render("Ready: continuing opens the eBay consent page in your browser."),
+			"",
+			m.keyLine([][2]string{{"enter", "continue"},
+				{"o", "open developer.ebay.com"}, {"esc", "back"}}))
+	} else {
+		lines = append(lines,
+			fg(cRed).Render("Fill in the ✗ fields in settings first."),
+			"",
+			m.keyLine([][2]string{{"o", "open developer.ebay.com"}, {"esc", "back"}}))
+	}
+	return m.panelStyle().Render(strings.Join(lines, "\n"))
+}
+
+func (m *Model) authPanel() string {
+	if m.authURL == "" {
+		return m.authIntroPanel()
+	}
+	p := m.pal()
+	mut := fg(p.muted)
+
+	lines := []string{
+		fg(p.bright).Bold(true).Render("AUTHORIZE EBAY"),
+		"",
+		fg(p.ink).Render("1. Sign in on the page that just opened and hit AGREE."),
+		mut.Render("   (if no browser appeared, the URL is:)"),
+	}
+	for _, chunk := range wrapChunks(m.authURL, 64) {
+		lines = append(lines, fg(cBlue).Render("   "+chunk))
+	}
+	lines = append(lines,
+		"",
+		fg(p.ink).Render("2. Paste the URL eBay redirects you to (a 404 page is fine):"),
+		"",
+		m.setInput.View(),
+		"")
+	if m.authBusy {
+		lines = append(lines, fg(cGreen).Render("EXCHANGING…"))
+	} else {
+		lines = append(lines, m.keyLine([][2]string{
+			{"enter", "exchange"}, {"esc", "back"}}))
+	}
+	return m.panelStyle().Render(strings.Join(lines, "\n"))
+}
+
 // logo is the wordmark in the bottom-right corner: quiet "bye", bright "CLI",
 // and the phosphor block cursor from the web brand.
 func (m *Model) logo() string {
@@ -577,8 +734,8 @@ func (m *Model) footerView() string {
 	} else {
 		// keys get the subtle blue, descriptions stay muted — the Footer look
 		line = " " + m.keyLine([][2]string{
-			{"enter", "detail"}, {"s", "sync"}, {"c", "cost"}, {"p", "phosphor"},
-			{"r", "reload"}, {"1-0", "sort"}, {"q", "quit"},
+			{"enter", "detail"}, {"e", "ebay sync"}, {"c", "cost"},
+			{"p", "phosphor"}, {"s", "settings"}, {"1-0", "sort"}, {"q", "quit"},
 		})
 		if m.syncing {
 			line = " " + fg(cGreen).Render("SYNCING…") + line

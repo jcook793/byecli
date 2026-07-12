@@ -1,6 +1,9 @@
 package ui
 
 import (
+	"encoding/json"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -90,16 +93,159 @@ func TestDetailAndCostOverlays(t *testing.T) {
 	}
 }
 
-func TestPhosphorToggleAndReload(t *testing.T) {
+func TestSettingsOverlay(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.json")
+	t.Setenv("BYECLI_CONFIG", path)
+	os.WriteFile(path, []byte(`{"client_id":"me-byecli-PRD-1234567890",
+		"client_secret":"PRD-supersecretvalue","keep_me":"yes"}`), 0o600)
+
+	m := seededModel(t)
+	mm, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("s")})
+	m = mm.(*Model)
+	if m.mode != modeSettings {
+		t.Fatal(", did not open settings")
+	}
+	v := m.View()
+	for _, want := range []string{"SETTINGS", "EBAY", "EASYPOST", "PRINTERS",
+		"client_id", "sync_days", "90 (default)", "<NOT SET>",
+		"me-byecli-PRD-1234567890", "••••"} {
+		if !strings.Contains(v, want) {
+			t.Errorf("settings missing %q", want)
+		}
+	}
+	if strings.Contains(v, "supersecret") || strings.Contains(v, "PRD-s") {
+		t.Error("client_secret not fully hidden")
+	}
+
+	// walk down to sync_days and set it
+	for i, f := range settingFields {
+		if f.label == "sync_days" {
+			m.setCursor = i
+			break
+		}
+	}
+	mm, _ = m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	m = mm.(*Model)
+	if !m.setEditing {
+		t.Fatal("enter did not start editing")
+	}
+	mm, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("30")})
+	m = mm.(*Model)
+	mm, _ = m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	m = mm.(*Model)
+	if m.setEditing || !strings.Contains(m.notice, "SAVED") {
+		t.Fatalf("save failed: editing=%v notice=%q", m.setEditing, m.notice)
+	}
+
+	// the flat legacy file comes back nested, extras intact, legacy keys gone
+	raw, _ := os.ReadFile(path)
+	var saved map[string]any
+	json.Unmarshal(raw, &saved)
+	eb, _ := saved["ebay"].(map[string]any)
+	if eb == nil || eb["sync_days"] != float64(30) {
+		t.Errorf("ebay.sync_days not saved: %v", saved)
+	}
+	if eb["client_secret"] != "PRD-supersecretvalue" {
+		t.Error("client_secret mangled in migration")
+	}
+	if saved["keep_me"] != "yes" {
+		t.Error("unknown config key lost")
+	}
+	if _, ok := saved["client_id"]; ok {
+		t.Error("legacy flat key written back")
+	}
+
+	// bad value: error notice, still editing after
+	mm, _ = m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	m = mm.(*Model)
+	m.setInput.SetValue("banana")
+	mm, _ = m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	m = mm.(*Model)
+	if !m.noticeErr {
+		t.Error("banana accepted as sync_days")
+	}
+	mm, _ = m.Update(tea.KeyMsg{Type: tea.KeyEsc})
+	m = mm.(*Model)
+	mm, _ = m.Update(tea.KeyMsg{Type: tea.KeyEsc})
+	m = mm.(*Model)
+	if m.mode != modeTable {
+		t.Fatal("esc did not close settings")
+	}
+}
+
+func TestAuthFromSettings(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.json")
+	t.Setenv("BYECLI_CONFIG", path)
+	os.WriteFile(path, []byte(`{"ebay":{"client_id":"cid","client_secret":"sec"}}`), 0o600)
+
+	opened := ""
+	orig := openURL
+	openURL = func(u string) { opened = u }
+	t.Cleanup(func() { openURL = orig })
+
+	m := seededModel(t)
+	mm, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("s")})
+	m = mm.(*Model)
+
+	// a lands on the instructions screen, ✗ flagging the missing ru_name
+	mm, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("a")})
+	m = mm.(*Model)
+	if m.mode != modeAuth || m.authURL != "" {
+		t.Fatalf("a did not open instructions: mode=%v url=%q", m.mode, m.authURL)
+	}
+	v := m.View()
+	for _, want := range []string{"AUTHORIZE EBAY", "developer.ebay.com",
+		"developer program", "✗", "✓"} {
+		if !strings.Contains(v, want) {
+			t.Errorf("instructions missing %q", want)
+		}
+	}
+	if opened != "" {
+		t.Errorf("browser opened before continue: %q", opened)
+	}
+	// continuing without ru_name complains and stays put
+	mm, _ = m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	m = mm.(*Model)
+	if m.authURL != "" || !m.noticeErr || !strings.Contains(m.notice, "RU_NAME") {
+		t.Fatalf("expected ru_name complaint, got url=%q notice=%q", m.authURL, m.notice)
+	}
+
+	m.cfg.Ebay.RuName = "my-ru-name"
+	mm, _ = m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	m = mm.(*Model)
+	if !strings.Contains(opened, "auth.ebay.com/oauth2/authorize") ||
+		!strings.Contains(opened, "client_id=cid") {
+		t.Errorf("browser opened with %q", opened)
+	}
+	v = m.View()
+	for _, want := range []string{"AUTHORIZE EBAY", "AGREE", "Paste"} {
+		if !strings.Contains(v, want) {
+			t.Errorf("auth panel missing %q", want)
+		}
+	}
+	// empty paste is rejected; esc steps back to instructions, then settings
+	mm, _ = m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	m = mm.(*Model)
+	if !m.noticeErr {
+		t.Error("empty paste accepted")
+	}
+	mm, _ = m.Update(tea.KeyMsg{Type: tea.KeyEsc})
+	m = mm.(*Model)
+	if m.mode != modeAuth || m.authURL != "" {
+		t.Fatal("esc did not step back to instructions")
+	}
+	mm, _ = m.Update(tea.KeyMsg{Type: tea.KeyEsc})
+	m = mm.(*Model)
+	if m.mode != modeSettings {
+		t.Fatal("esc did not return to settings")
+	}
+}
+
+func TestPhosphorToggle(t *testing.T) {
 	m := seededModel(t)
 	mm, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("p")})
 	m = mm.(*Model)
 	if !m.amber {
 		t.Fatal("p did not toggle phosphor")
-	}
-	mm, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("r")})
-	m = mm.(*Model)
-	if m.notice != "RELOADED" {
-		t.Fatalf("notice: %q", m.notice)
 	}
 }

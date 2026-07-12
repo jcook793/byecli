@@ -21,9 +21,9 @@ Single static binary (Bubble Tea + pure-Go SQLite, no cgo). Data lives in
 `~/.config/byecli/config.json`; override with `$BYECLI_DB` / `--db` and
 `$BYECLI_CONFIG`.
 
-Keys: arrows/jk move · enter detail · `s` sync · `c` cost (>0 marks a FLIP,
-0 a BYE) · `o` open on eBay (in detail) · `p` green/amber phosphor · `r`
-reload · `1-0` or click a header to sort · `q` quit.
+Keys: arrows/jk move · enter detail · `e` eBay sync · `c` cost (>0 marks a
+FLIP, 0 a BYE) · `o` open on eBay (in detail) · `p` green/amber phosphor ·
+`s` settings · `1-0` or click a header to sort · `q` quit.
 
 ```sh
 cd byecli && go test ./...   # canned-payload sync tests + UI render tests
@@ -31,7 +31,7 @@ cd byecli && go test ./...   # canned-payload sync tests + UI render tests
 
 ## eBay sync
 
-`s` pulls, for the last `sync_days` (default 90):
+`e` pulls, for the last `sync_days` (default 90):
 
 - **Active listings** (Trading API `GetMyeBaySelling`) — new rows appear
   automatically; asking price shows italic in SALE until sold.
@@ -51,15 +51,18 @@ bought through eBay; a hand-entered label cost always wins over the synced one.
    (personal-use app, own account only) — production keys stay disabled until
    this is done.
 2. Under **Application Keys**, copy the production App ID → `client_id` and
-   Cert ID → `client_secret` into `~/.config/byecli/config.json`.
+   Cert ID → `client_secret` into settings (`s` in the app) — they land in
+   `~/.config/byecli/config.json`.
 3. On the **User Tokens** page → *Get a Token from eBay via Your Application*
    → choose **OAuth** (not Auth'n'Auth) and add a redirect URL config. The
    "auth accepted" URL only needs to be HTTPS, not real —
-   `https://localhost/accepted` works. Note the generated **RuName**.
-4. Run `python3 tools/get_refresh_token.py` (stdlib only): open the printed
-   consent URL, sign in with your seller account, paste back the URL eBay
-   redirects you to (it 404s; the code is in the address bar). It saves the
-   **refresh token** (long-lived, ~18 months) into the config.
+   `https://localhost/accepted` works. Put the generated **RuName** into
+   the `ru_name` setting.
+4. Press `a` in settings: your browser opens the eBay consent page — sign
+   in with your seller account, hit Agree, then paste the URL eBay
+   redirects you to (it 404s; the code is in the address bar) into the
+   panel. The **refresh token** (long-lived, ~18 months) lands in the
+   config.
 
 ## Notes
 

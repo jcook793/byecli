@@ -19,16 +19,17 @@ outside users ever want `apt upgrade`. XDG paths already make the binary
 relocatable. GitHub Actions does the work: tests on every push, goreleaser
 on every tag.
 
-## 3. Settings and auth in the TUI
+## 3. Settings and auth in the TUI — done
 
 View and edit the config from inside the app — a settings overlay in the
 same phosphor idiom (printer names, sync window, API keys) instead of
 hand-editing `config.json`. The file stays the source of truth; the TUI
 just becomes a friendlier way to touch it.
 
-Same treatment for credentials: port tools/get_refresh_token.py to a
-`byecli auth` flow so eBay token renewal (~18 months) doesn't need
-Python, and EasyPost auth slots in alongside it when Ship arrives.
+Same treatment for credentials: the eBay consent flow (the retired
+tools/get_refresh_token.py) lives in settings — `a` opens the browser,
+paste the redirect back, token saved — so renewal (~18 months) never
+leaves the app. EasyPost auth slots in alongside it when Ship arrives.
 Secrets stay in `~/.config/byecli/config.json`, never in the repo.
 
 ## 4. Ship — the big sprint

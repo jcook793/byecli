@@ -6,6 +6,7 @@ import (
 	"database/sql"
 	"fmt"
 	"os/exec"
+	"runtime"
 	"sort"
 	"strconv"
 	"strings"
@@ -24,6 +25,8 @@ const (
 	modeTable mode = iota
 	modeDetail
 	modeCost
+	modeSettings
+	modeAuth
 )
 
 const (
@@ -61,6 +64,13 @@ type Model struct {
 	syncing       bool
 	costInput     textinput.Model
 
+	cfg        *core.Config // loaded when the settings overlay opens
+	setCursor  int
+	setEditing bool
+	setInput   textinput.Model
+	authURL    string // consent URL shown while modeAuth
+	authBusy   bool   // token exchange in flight
+
 	// layout notes taken while rendering, for mouse hit-testing
 	headerY   int
 	rowsY     int
@@ -74,7 +84,9 @@ func New(db *sql.DB) *Model {
 	ti.Placeholder = "0.00"
 	ti.CharLimit = 10
 	ti.Width = 12
-	m := &Model{db: db, sortCol: colEnds, sortDir: 1, costInput: ti}
+	si := textinput.New()
+	si.Width = 44 // refresh tokens run long; CharLimit stays unlimited
+	m := &Model{db: db, sortCol: colEnds, sortDir: 1, costInput: ti, setInput: si}
 	m.reload()
 	return m
 }
@@ -252,6 +264,14 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case clearNoticeMsg:
 		m.notice = ""
 		return m, nil
+	case authDoneMsg:
+		m.authBusy = false
+		if msg.err != nil {
+			return m, m.say(strings.ToUpper(msg.err.Error()), true)
+		}
+		m.cfg = msg.cfg
+		m.mode = modeSettings
+		return m, m.say(fmt.Sprintf("REFRESH TOKEN SAVED · GOOD FOR ~%d DAYS", msg.days), false)
 	case tea.MouseMsg:
 		return m.updateMouse(msg)
 	case tea.KeyMsg:
@@ -260,6 +280,10 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m.updateCostKey(msg)
 		case modeDetail:
 			return m.updateDetailKey(msg)
+		case modeSettings:
+			return m.updateSettingsKey(msg)
+		case modeAuth:
+			return m.updateAuthKey(msg)
 		default:
 			return m.updateTableKey(msg)
 		}
@@ -305,10 +329,16 @@ func (m *Model) updateTableKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case "p":
 		m.amber = !m.amber
 		SetTerminalBG(m.amber)
-	case "r":
-		m.reload()
-		return m, m.say("RELOADED", false)
 	case "s":
+		cfg, err := core.LoadConfig()
+		if err != nil {
+			return m, m.say(strings.ToUpper(err.Error()), true)
+		}
+		m.cfg = cfg
+		m.setCursor = 0
+		m.setEditing = false
+		m.mode = modeSettings
+	case "e":
 		if !m.syncing {
 			m.syncing = true
 			return m, tea.Batch(m.say("SYNCING…", false), doSync(m.db))
@@ -347,7 +377,7 @@ func (m *Model) updateDetailKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case "o":
 		if m.detail != nil && m.detail.EbayItemID != nil {
 			url := "https://www.ebay.com/itm/" + *m.detail.EbayItemID
-			_ = exec.Command("open", url).Start()
+			openURL(url)
 			return m, m.say("OPENED "+url, false)
 		}
 		return m, m.say("NO EBAY ITEM ID — SYNC FIRST", true)
@@ -386,6 +416,211 @@ func (m *Model) updateCostKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	}
 	var cmd tea.Cmd
 	m.costInput, cmd = m.costInput.Update(msg)
+	return m, cmd
+}
+
+// ── settings overlay ─────────────────────────────────────────────────────
+
+const easypostKeysURL = "https://www.easypost.com/account/api-keys"
+
+// settingField maps one config.json key onto the overlay: which section it
+// renders under, how to read and write it (with validation), and whether the
+// list hides its value.
+type settingField struct {
+	section string // config.json section header
+	label   string // the json key, so the overlay and the file speak alike
+	empty   string // shown when unset
+	secret  bool
+	get     func(c *core.Config) string
+	set     func(c *core.Config, v string) error
+}
+
+var settingFields = []settingField{
+	{"ebay", "environment", "production (default)", false,
+		func(c *core.Config) string { return c.Ebay.Environment },
+		func(c *core.Config, v string) error {
+			if v != "" && v != "production" && v != "sandbox" {
+				return fmt.Errorf("environment must be production or sandbox")
+			}
+			c.Ebay.Environment = v
+			return nil
+		}},
+	{"ebay", "client_id", "<NOT SET>", false,
+		func(c *core.Config) string { return c.Ebay.ClientID },
+		func(c *core.Config, v string) error { c.Ebay.ClientID = v; return nil }},
+	{"ebay", "client_secret", "<NOT SET>", true,
+		func(c *core.Config) string { return c.Ebay.ClientSecret },
+		func(c *core.Config, v string) error { c.Ebay.ClientSecret = v; return nil }},
+	{"ebay", "ru_name", "<NOT SET>", false,
+		func(c *core.Config) string { return c.Ebay.RuName },
+		func(c *core.Config, v string) error { c.Ebay.RuName = v; return nil }},
+	{"ebay", "refresh_token", "<NOT SET> · press a to authorize", true,
+		func(c *core.Config) string { return c.Ebay.RefreshToken },
+		func(c *core.Config, v string) error { c.Ebay.RefreshToken = v; return nil }},
+	{"ebay", "sync_days", "90 (default)", false,
+		func(c *core.Config) string {
+			if c.Ebay.SyncDays == 0 {
+				return ""
+			}
+			return strconv.Itoa(c.Ebay.SyncDays)
+		},
+		func(c *core.Config, v string) error {
+			if v == "" {
+				c.Ebay.SyncDays = 0
+				return nil
+			}
+			n, err := strconv.Atoi(v)
+			if err != nil || n <= 0 {
+				return fmt.Errorf("sync_days must be a positive number")
+			}
+			c.Ebay.SyncDays = n
+			return nil
+		}},
+	{"easypost", "api_key",
+		"<NOT SET> · " + hyperlink(easypostKeysURL,
+			"easypost.com/account/api-keys"), true,
+		func(c *core.Config) string { return c.EasyPost.APIKey },
+		func(c *core.Config, v string) error { c.EasyPost.APIKey = v; return nil }},
+	{"printers", "label", "<NOT SET>", false,
+		func(c *core.Config) string { return c.Printers.Label },
+		func(c *core.Config, v string) error { c.Printers.Label = v; return nil }},
+	{"printers", "packing_slip", "<NOT SET>", false,
+		func(c *core.Config) string { return c.Printers.PackingSlip },
+		func(c *core.Config, v string) error { c.Printers.PackingSlip = v; return nil }},
+}
+
+func (m *Model) updateSettingsKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	if m.setEditing {
+		switch msg.String() {
+		case "esc":
+			m.setEditing = false
+			return m, nil
+		case "enter":
+			f := settingFields[m.setCursor]
+			if err := f.set(m.cfg, strings.TrimSpace(m.setInput.Value())); err != nil {
+				return m, m.say(strings.ToUpper(err.Error()), true)
+			}
+			if err := m.cfg.Save(); err != nil {
+				return m, m.say(strings.ToUpper(err.Error()), true)
+			}
+			m.setEditing = false
+			return m, m.say("SAVED "+strings.ToUpper(f.label), false)
+		}
+		var cmd tea.Cmd
+		m.setInput, cmd = m.setInput.Update(msg)
+		return m, cmd
+	}
+	switch msg.String() {
+	case "esc", "q":
+		m.mode = modeTable
+		m.cfg = nil
+	case "up", "k":
+		if m.setCursor > 0 {
+			m.setCursor--
+		}
+	case "down", "j":
+		if m.setCursor < len(settingFields)-1 {
+			m.setCursor++
+		}
+	case "enter":
+		f := settingFields[m.setCursor]
+		m.setEditing = true
+		m.setInput.Placeholder = ""
+		if f.secret {
+			m.setInput.EchoMode = textinput.EchoPassword
+			m.setInput.EchoCharacter = '•'
+		} else {
+			m.setInput.EchoMode = textinput.EchoNormal
+		}
+		m.setInput.SetValue(f.get(m.cfg))
+		m.setInput.CursorEnd()
+		return m, m.setInput.Focus()
+	case "a":
+		m.authURL = "" // instructions first; consent URL built on continue
+		m.mode = modeAuth
+	case "o":
+		if settingFields[m.setCursor].section == "easypost" {
+			openURL(easypostKeysURL)
+			return m, m.say("OPENED "+easypostKeysURL, false)
+		}
+	}
+	return m, nil
+}
+
+// ── auth overlay: browser consent → pasted redirect → refresh token ─────
+
+type authDoneMsg struct {
+	cfg  *core.Config
+	days int
+	err  error
+}
+
+// doExchange runs off the update loop; it gets its own copy of the config so
+// nothing mutates what the view is rendering.
+func doExchange(cfg core.Config, pasted string) tea.Cmd {
+	return func() tea.Msg {
+		days, err := ebay.ExchangeAuthCode(&cfg, pasted)
+		return authDoneMsg{&cfg, days, err}
+	}
+}
+
+// hyperlink wraps text in an OSC 8 terminal hyperlink: clickable (usually
+// cmd-click, since the app owns the mouse) where supported, invisible
+// zero-width codes everywhere else.
+func hyperlink(url, text string) string {
+	return "\x1b]8;;" + url + "\x1b\\" + text + "\x1b]8;;\x1b\\"
+}
+
+// openURL launches the system browser; a var so tests can stub it out.
+var openURL = func(u string) {
+	cmd := "open"
+	if runtime.GOOS != "darwin" {
+		cmd = "xdg-open"
+	}
+	_ = exec.Command(cmd, u).Start()
+}
+
+func (m *Model) updateAuthKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	if m.authURL == "" { // instructions screen, before any browser opens
+		switch msg.String() {
+		case "esc", "q":
+			m.mode = modeSettings
+		case "o":
+			openURL("https://developer.ebay.com")
+			return m, m.say("OPENED DEVELOPER.EBAY.COM", false)
+		case "enter":
+			u, err := ebay.ConsentURL(m.cfg)
+			if err != nil {
+				return m, m.say(strings.ToUpper(err.Error()), true)
+			}
+			m.authURL = u
+			openURL(u)
+			m.setInput.EchoMode = textinput.EchoNormal
+			m.setInput.Placeholder = "https://…?code=…"
+			m.setInput.SetValue("")
+			return m, m.setInput.Focus()
+		}
+		return m, nil
+	}
+	switch msg.String() { // paste screen
+	case "esc":
+		if !m.authBusy {
+			m.authURL = "" // back to the instructions
+		}
+		return m, nil
+	case "enter":
+		if m.authBusy {
+			return m, nil
+		}
+		pasted := strings.TrimSpace(m.setInput.Value())
+		if pasted == "" {
+			return m, m.say("PASTE THE URL EBAY REDIRECTED YOU TO", true)
+		}
+		m.authBusy = true
+		return m, tea.Batch(m.say("EXCHANGING…", false), doExchange(*m.cfg, pasted))
+	}
+	var cmd tea.Cmd
+	m.setInput, cmd = m.setInput.Update(msg)
 	return m, cmd
 }
 

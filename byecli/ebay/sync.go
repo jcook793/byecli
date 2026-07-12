@@ -14,7 +14,6 @@ import (
 	"math"
 	"net/http"
 	"net/url"
-	"os"
 	"strconv"
 	"strings"
 	"time"
@@ -31,13 +30,8 @@ func errf(format string, args ...any) error {
 	return &SyncError{fmt.Sprintf(format, args...)}
 }
 
-type Config struct {
-	Environment  string `json:"environment"`
-	ClientID     string `json:"client_id"`
-	ClientSecret string `json:"client_secret"`
-	RefreshToken string `json:"refresh_token"`
-	SyncDays     int    `json:"sync_days"`
-}
+// Config is the shared core config; sync needs the eBay credential fields.
+type Config = core.Config
 
 type hostSet struct{ auth, api, finances, trading string }
 
@@ -64,46 +58,43 @@ const scopes = "https://api.ebay.com/oauth/api_scope " +
 var httpClient = &http.Client{Timeout: 30 * time.Second}
 
 func LoadConfig() (*Config, error) {
-	path := core.ConfigPath()
-	raw, err := os.ReadFile(path)
+	cfg, err := core.LoadConfig()
 	if err != nil {
-		return nil, errf("no config at %s — create it with your eBay keys "+
-			"(client_id, client_secret, refresh_token)", path)
-	}
-	var cfg Config
-	if err := json.Unmarshal(raw, &cfg); err != nil {
-		return nil, errf("%s is not valid JSON: %v", path, err)
+		return nil, errf("%v", err)
 	}
 	for name, v := range map[string]string{
-		"client_id": cfg.ClientID, "client_secret": cfg.ClientSecret,
-		"refresh_token": cfg.RefreshToken,
+		"client_id": cfg.Ebay.ClientID, "client_secret": cfg.Ebay.ClientSecret,
 	} {
 		if v == "" || strings.HasPrefix(v, "YOUR-") {
-			return nil, errf("config is missing %q", name)
+			return nil, errf("config is missing %q — add your eBay keys in "+
+				"settings (s) or %s", name, core.ConfigPath())
 		}
 	}
-	if cfg.Environment == "" {
-		cfg.Environment = "production"
+	if cfg.Ebay.RefreshToken == "" {
+		return nil, errf("no refresh token — authorize in settings (s then a)")
 	}
-	if _, ok := hosts[cfg.Environment]; !ok {
+	if cfg.Ebay.Environment == "" {
+		cfg.Ebay.Environment = "production"
+	}
+	if _, ok := hosts[cfg.Ebay.Environment]; !ok {
 		return nil, errf("environment must be 'production' or 'sandbox'")
 	}
-	if cfg.SyncDays == 0 {
-		cfg.SyncDays = 90
+	if cfg.Ebay.SyncDays == 0 {
+		cfg.Ebay.SyncDays = 90
 	}
-	return &cfg, nil
+	return cfg, nil
 }
 
 func getAccessToken(cfg *Config) (string, error) {
 	form := url.Values{
 		"grant_type":    {"refresh_token"},
-		"refresh_token": {cfg.RefreshToken},
+		"refresh_token": {cfg.Ebay.RefreshToken},
 		"scope":         {scopes},
 	}
 	req, _ := http.NewRequest("POST",
-		hosts[cfg.Environment].auth+"/identity/v1/oauth2/token",
+		hosts[cfg.Ebay.Environment].auth+"/identity/v1/oauth2/token",
 		strings.NewReader(form.Encode()))
-	req.SetBasicAuth(cfg.ClientID, cfg.ClientSecret)
+	req.SetBasicAuth(cfg.Ebay.ClientID, cfg.Ebay.ClientSecret)
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	resp, err := httpClient.Do(req)
 	if err != nil {
@@ -183,7 +174,7 @@ func FetchActiveListings(cfg *Config, token string) ([]Listing, error) {
     </Pagination>
   </ActiveList>
 </GetMyeBaySellingRequest>`, page)
-		req, _ := http.NewRequest("POST", hosts[cfg.Environment].trading,
+		req, _ := http.NewRequest("POST", hosts[cfg.Ebay.Environment].trading,
 			strings.NewReader(body))
 		req.Header.Set("X-EBAY-API-COMPATIBILITY-LEVEL", "1193")
 		req.Header.Set("X-EBAY-API-CALL-NAME", "GetMyeBaySelling")
@@ -308,7 +299,7 @@ func pagedGet(rawURL, token string, params url.Values, handle func([]byte) (stri
 
 func FetchOrders(cfg *Config, token, sinceISO string) ([]Order, error) {
 	var orders []Order
-	err := pagedGet(hosts[cfg.Environment].api+"/sell/fulfillment/v1/order", token,
+	err := pagedGet(hosts[cfg.Ebay.Environment].api+"/sell/fulfillment/v1/order", token,
 		url.Values{"filter": {"creationdate:[" + sinceISO + "..]"}, "limit": {"200"}},
 		func(body []byte) (string, error) {
 			var page struct {
@@ -337,7 +328,7 @@ type txnPage struct {
 
 func fetchTransactions(cfg *Config, token, sinceISO, txnType string,
 	visit func(t txnPage)) error {
-	return pagedGet(hosts[cfg.Environment].finances+"/sell/finances/v1/transaction",
+	return pagedGet(hosts[cfg.Ebay.Environment].finances+"/sell/finances/v1/transaction",
 		token, url.Values{
 			"filter": {"transactionDate:[" + sinceISO + "..],transactionType:{" + txnType + "}"},
 			"limit":  {"200"},
@@ -603,7 +594,7 @@ func RunSync(db *sql.DB) (Stats, error) {
 		return st, err
 	}
 	sinceISO := time.Now().UTC().
-		AddDate(0, 0, -cfg.SyncDays).Format("2006-01-02T15:04:05.000Z")
+		AddDate(0, 0, -cfg.Ebay.SyncDays).Format("2006-01-02T15:04:05.000Z")
 	listings, err := FetchActiveListings(cfg, token)
 	if err != nil {
 		return st, err
