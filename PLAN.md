@@ -17,7 +17,7 @@ via nfpms (static binary, no deps) — attached to releases for
 `apt install ./byecli_*.deb` on the Pi; a real signed apt repo only if
 outside users ever want `apt upgrade`. XDG paths already make the binary
 relocatable. GitHub Actions does the work: tests on every push, goreleaser
-on every tag. VHS demo GIF for the README.
+on every tag.
 
 ## 3. Settings and auth in the TUI
 
@@ -75,7 +75,13 @@ Also in this sprint — ledger correctness, same sync layer:
   `~/.local/share/byecli/backups/` before each sync, keep the last N.
   Manual fields are the only data eBay can't re-sync.
 
-## 5. Sell-side automation
+## 5. Demo GIF
+
+VHS demo GIF for the README — recorded once the ship flow exists, so the
+demo tells the whole story: sold item to printed label without leaving
+the terminal.
+
+## 6. Sell-side automation
 
 - **Relist** — auction ended unsold → one-key relist, optionally at a
   lower price.
