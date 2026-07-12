@@ -64,6 +64,15 @@ bought through eBay; a hand-entered label cost always wins over the synced one.
    panel. The **refresh token** (long-lived, ~18 months) lands in the
    config.
 
+## Test mode
+
+`test_mode` in settings flips the whole app onto the test rails at once:
+eBay sandbox credentials (the `test_*` fields — sandbox keys and RuName
+come from the Sandbox side of the developer portal), the EasyPost test
+key (`EZTK…`), and a separate database (`byecli-test.db`) so sandbox
+syncs never touch the real ledger. The footer shows a TEST badge while
+it's on; restart after toggling so the database switch takes effect.
+
 ## Notes
 
 - **Net profit** = sale + shipping charged − cost basis − label − eBay fees −

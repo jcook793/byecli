@@ -662,8 +662,9 @@ func (m *Model) authIntroPanel() string {
 	p := m.pal()
 	mut := fg(p.muted)
 	ink := fg(p.ink)
-	keysOK := m.cfg.Ebay.ClientID != "" && m.cfg.Ebay.ClientSecret != ""
-	ruOK := m.cfg.Ebay.RuName != ""
+	creds := m.cfg.EbayCreds()
+	keysOK := creds.ClientID != "" && creds.ClientSecret != ""
+	ruOK := creds.RuName != ""
 	mark := func(ok bool) string {
 		if ok {
 			return fg(cGreen).Render("✓ ")
@@ -671,8 +672,12 @@ func (m *Model) authIntroPanel() string {
 		return fg(cRed).Render("✗ ")
 	}
 
+	title := "AUTHORIZE EBAY"
+	if m.cfg.TestMode {
+		title += " · SANDBOX"
+	}
 	lines := []string{
-		fg(p.bright).Bold(true).Render("AUTHORIZE EBAY"),
+		fg(p.bright).Bold(true).Render(title),
 		"",
 		ink.Render("Syncing needs a refresh token, which needs a (free) eBay"),
 		ink.Render("developer account. One-time setup, all on developer.ebay.com:"),
@@ -687,6 +692,12 @@ func (m *Model) authIntroPanel() string {
 		ink.Render("     add a redirect URL (any HTTPS URL, it can 404) and put"),
 		ink.Render("     the generated RuName into ru_name."),
 		"",
+	}
+	if m.cfg.TestMode {
+		lines = append(lines,
+			mut.Render("Test mode is on: this flow uses the sandbox keyset — the"),
+			mut.Render("test_* fields in settings, from the Sandbox side of the portal."),
+			"")
 	}
 	if keysOK && ruOK {
 		lines = append(lines,
@@ -760,6 +771,11 @@ func (m *Model) footerView() string {
 		if m.syncing {
 			line = " " + fg(cGreen).Render("SYNCING…") + line
 		}
+	}
+	if m.testMode {
+		badge := lipgloss.NewStyle().Foreground(lipgloss.Color(m.pal().bg)).
+			Background(cTape).Bold(true).Render("TEST")
+		line = " " + badge + line
 	}
 	logo := m.logo()
 	pad := m.width - lipgloss.Width(line) - lipgloss.Width(logo) - 1

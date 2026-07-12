@@ -124,4 +124,44 @@ func TestConfigMigratesFlatKeys(t *testing.T) {
 	if cfg.Ebay.ClientID != "new-nested" {
 		t.Errorf("flat key beat nested: %q", cfg.Ebay.ClientID)
 	}
+
+	// the retired environment field maps sandbox onto test_mode
+	os.WriteFile(path, []byte(`{"ebay": {"environment": "sandbox"}}`), 0o600)
+	cfg, _ = LoadConfig()
+	if !cfg.TestMode {
+		t.Error("environment=sandbox did not migrate to test_mode")
+	}
+	os.WriteFile(path, []byte(`{"environment": "production"}`), 0o600)
+	cfg, _ = LoadConfig()
+	if cfg.TestMode {
+		t.Error("production migrated to test_mode")
+	}
+}
+
+func TestCredsFollowTestMode(t *testing.T) {
+	cfg := &Config{Ebay: EbayConfig{
+		ClientID: "prod-id", RefreshToken: "prod-tok", RuName: "prod-ru",
+		TestClientID: "test-id", TestRuName: "test-ru"},
+		EasyPost: EasyPostConfig{APIKey: "EZAK1", TestAPIKey: "EZTK1"}}
+
+	c := cfg.EbayCreds()
+	if c.Env != "production" || c.ClientID != "prod-id" || c.RuName != "prod-ru" {
+		t.Fatalf("prod creds: %+v", c)
+	}
+	if cfg.EasyPostKey() != "EZAK1" {
+		t.Fatalf("prod easypost key: %q", cfg.EasyPostKey())
+	}
+
+	cfg.TestMode = true
+	c = cfg.EbayCreds()
+	if c.Env != "sandbox" || c.ClientID != "test-id" || c.RefreshToken != "" {
+		t.Fatalf("test creds: %+v", c)
+	}
+	if cfg.EasyPostKey() != "EZTK1" {
+		t.Fatalf("test easypost key: %q", cfg.EasyPostKey())
+	}
+	cfg.SetRefreshToken("fresh")
+	if cfg.Ebay.TestRefreshToken != "fresh" || cfg.Ebay.RefreshToken != "prod-tok" {
+		t.Fatalf("token slot: %+v", cfg.Ebay)
+	}
 }

@@ -67,6 +67,7 @@ type Model struct {
 	costInput     textinput.Model
 
 	cfg        *core.Config // loaded when the settings overlay opens
+	testMode   bool         // mirrored from config for the footer badge
 	setCursor  int
 	setEditing bool
 	setInput   textinput.Model
@@ -89,6 +90,9 @@ func New(db *sql.DB) *Model {
 	si := textinput.New()
 	si.Width = 44 // refresh tokens run long; CharLimit stays unlimited
 	m := &Model{db: db, sortCol: colEnds, sortDir: 1, costInput: ti, setInput: si}
+	if cfg, err := core.LoadConfig(); err == nil {
+		m.testMode = cfg.TestMode
+	}
 	m.reload()
 	return m
 }
@@ -454,15 +458,14 @@ type settingField struct {
 }
 
 var settingFields = []settingField{
-	{"ebay", "environment", "production (default)", false,
-		func(c *core.Config) string { return c.Ebay.Environment },
-		func(c *core.Config, v string) error {
-			if v != "" && v != "production" && v != "sandbox" {
-				return fmt.Errorf("environment must be production or sandbox")
+	{"general", "test_mode", "off · enter toggles", false,
+		func(c *core.Config) string {
+			if c.TestMode {
+				return "ON"
 			}
-			c.Ebay.Environment = v
-			return nil
-		}},
+			return ""
+		},
+		nil}, // enter toggles it in place; set is never called
 	{"ebay", "client_id", "<NOT SET>", false,
 		func(c *core.Config) string { return c.Ebay.ClientID },
 		func(c *core.Config, v string) error { c.Ebay.ClientID = v; return nil }},
@@ -475,6 +478,18 @@ var settingFields = []settingField{
 	{"ebay", "refresh_token", "<NOT SET> · press a to authorize", true,
 		func(c *core.Config) string { return c.Ebay.RefreshToken },
 		func(c *core.Config, v string) error { c.Ebay.RefreshToken = v; return nil }},
+	{"ebay", "test_client_id", "<NOT SET>", false,
+		func(c *core.Config) string { return c.Ebay.TestClientID },
+		func(c *core.Config, v string) error { c.Ebay.TestClientID = v; return nil }},
+	{"ebay", "test_client_secret", "<NOT SET>", true,
+		func(c *core.Config) string { return c.Ebay.TestClientSecret },
+		func(c *core.Config, v string) error { c.Ebay.TestClientSecret = v; return nil }},
+	{"ebay", "test_ru_name", "<NOT SET>", false,
+		func(c *core.Config) string { return c.Ebay.TestRuName },
+		func(c *core.Config, v string) error { c.Ebay.TestRuName = v; return nil }},
+	{"ebay", "test_refresh_token", "<NOT SET> · a while test_mode is on", true,
+		func(c *core.Config) string { return c.Ebay.TestRefreshToken },
+		func(c *core.Config, v string) error { c.Ebay.TestRefreshToken = v; return nil }},
 	{"ebay", "sync_days", "90 (default)", false,
 		func(c *core.Config) string {
 			if c.Ebay.SyncDays == 0 {
@@ -499,6 +514,9 @@ var settingFields = []settingField{
 			"easypost.com/account/api-keys"), true,
 		func(c *core.Config) string { return c.EasyPost.APIKey },
 		func(c *core.Config, v string) error { c.EasyPost.APIKey = v; return nil }},
+	{"easypost", "test_api_key", "<NOT SET> · the EZTK… one", true,
+		func(c *core.Config) string { return c.EasyPost.TestAPIKey },
+		func(c *core.Config, v string) error { c.EasyPost.TestAPIKey = v; return nil }},
 	{"printers", "label", "<NOT SET>", false,
 		func(c *core.Config) string { return c.Printers.Label },
 		func(c *core.Config, v string) error { c.Printers.Label = v; return nil }},
@@ -542,6 +560,17 @@ func (m *Model) updateSettingsKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 	case "enter":
 		f := settingFields[m.setCursor]
+		if f.label == "test_mode" { // a switch, not a text field
+			m.cfg.TestMode = !m.cfg.TestMode
+			if err := m.cfg.Save(); err != nil {
+				return m, m.say(strings.ToUpper(err.Error()), true)
+			}
+			m.testMode = m.cfg.TestMode
+			if m.testMode {
+				return m, m.say("TEST MODE ON · RESTART TO SWITCH TO THE TEST DB", false)
+			}
+			return m, m.say("TEST MODE OFF · RESTART TO SWITCH TO THE REAL DB", false)
+		}
 		m.setEditing = true
 		m.setInput.Placeholder = ""
 		if f.secret {

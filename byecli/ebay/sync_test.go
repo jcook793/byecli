@@ -203,8 +203,10 @@ func TestFetchAndMetaMerge(t *testing.T) {
 		w.Write([]byte(tradingXML))
 	}))
 	defer srv.Close()
-	hosts["test"] = hostSet{trading: srv.URL, api: srv.URL, finances: srv.URL, auth: srv.URL}
-	cfg := &Config{Ebay: core.EbayConfig{Environment: "test"}}
+	orig := hosts["production"]
+	hosts["production"] = hostSet{trading: srv.URL, api: srv.URL, finances: srv.URL, auth: srv.URL}
+	defer func() { hosts["production"] = orig }()
+	cfg := &Config{}
 
 	parsed, err := FetchActiveListings(cfg, "fake-token")
 	if err != nil {
@@ -278,8 +280,10 @@ func TestFetchLabelCostsNetsCredits(t *testing.T) {
 		]}`))
 	}))
 	defer srv.Close()
-	hosts["test"] = hostSet{finances: srv.URL}
-	lc, err := FetchLabelCosts(&Config{Ebay: core.EbayConfig{Environment: "test"}}, "tok", "2026-01-01T00:00:00.000Z")
+	orig := hosts["production"]
+	hosts["production"] = hostSet{finances: srv.URL}
+	defer func() { hosts["production"] = orig }()
+	lc, err := FetchLabelCosts(&Config{}, "tok", "2026-01-01T00:00:00.000Z")
 	if err != nil {
 		t.Fatal(err)
 	}

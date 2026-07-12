@@ -57,27 +57,31 @@ const scopes = "https://api.ebay.com/oauth/api_scope " +
 
 var httpClient = &http.Client{Timeout: 30 * time.Second}
 
+// fieldName prefixes the config key with test_ when test mode selects the
+// sandbox set, so error messages point at the field that's actually empty.
+func fieldName(cfg *Config, name string) string {
+	if cfg.TestMode {
+		return "test_" + name
+	}
+	return name
+}
+
 func LoadConfig() (*Config, error) {
 	cfg, err := core.LoadConfig()
 	if err != nil {
 		return nil, errf("%v", err)
 	}
+	creds := cfg.EbayCreds()
 	for name, v := range map[string]string{
-		"client_id": cfg.Ebay.ClientID, "client_secret": cfg.Ebay.ClientSecret,
+		"client_id": creds.ClientID, "client_secret": creds.ClientSecret,
 	} {
 		if v == "" || strings.HasPrefix(v, "YOUR-") {
 			return nil, errf("config is missing %q — add your eBay keys in "+
-				"settings (s) or %s", name, core.ConfigPath())
+				"settings (s) or %s", fieldName(cfg, name), core.ConfigPath())
 		}
 	}
-	if cfg.Ebay.RefreshToken == "" {
+	if creds.RefreshToken == "" {
 		return nil, errf("no refresh token — authorize in settings (s then a)")
-	}
-	if cfg.Ebay.Environment == "" {
-		cfg.Ebay.Environment = "production"
-	}
-	if _, ok := hosts[cfg.Ebay.Environment]; !ok {
-		return nil, errf("environment must be 'production' or 'sandbox'")
 	}
 	if cfg.Ebay.SyncDays == 0 {
 		cfg.Ebay.SyncDays = 90
@@ -86,15 +90,16 @@ func LoadConfig() (*Config, error) {
 }
 
 func getAccessToken(cfg *Config) (string, error) {
+	creds := cfg.EbayCreds()
 	form := url.Values{
 		"grant_type":    {"refresh_token"},
-		"refresh_token": {cfg.Ebay.RefreshToken},
+		"refresh_token": {creds.RefreshToken},
 		"scope":         {scopes},
 	}
 	req, _ := http.NewRequest("POST",
-		hosts[cfg.Ebay.Environment].auth+"/identity/v1/oauth2/token",
+		hosts[creds.Env].auth+"/identity/v1/oauth2/token",
 		strings.NewReader(form.Encode()))
-	req.SetBasicAuth(cfg.Ebay.ClientID, cfg.Ebay.ClientSecret)
+	req.SetBasicAuth(creds.ClientID, creds.ClientSecret)
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	resp, err := httpClient.Do(req)
 	if err != nil {
@@ -174,7 +179,7 @@ func FetchActiveListings(cfg *Config, token string) ([]Listing, error) {
     </Pagination>
   </ActiveList>
 </GetMyeBaySellingRequest>`, page)
-		req, _ := http.NewRequest("POST", hosts[cfg.Ebay.Environment].trading,
+		req, _ := http.NewRequest("POST", hosts[cfg.EbayCreds().Env].trading,
 			strings.NewReader(body))
 		req.Header.Set("X-EBAY-API-COMPATIBILITY-LEVEL", "1193")
 		req.Header.Set("X-EBAY-API-CALL-NAME", "GetMyeBaySelling")
@@ -311,7 +316,7 @@ func pagedGet(rawURL, token string, params url.Values, handle func([]byte) (stri
 
 func FetchOrders(cfg *Config, token, sinceISO string) ([]Order, error) {
 	var orders []Order
-	err := pagedGet(hosts[cfg.Ebay.Environment].api+"/sell/fulfillment/v1/order", token,
+	err := pagedGet(hosts[cfg.EbayCreds().Env].api+"/sell/fulfillment/v1/order", token,
 		url.Values{"filter": {"creationdate:[" + sinceISO + "..]"}, "limit": {"200"}},
 		func(body []byte) (string, error) {
 			var page struct {
@@ -340,7 +345,7 @@ type txnPage struct {
 
 func fetchTransactions(cfg *Config, token, sinceISO, txnType string,
 	visit func(t txnPage)) error {
-	return pagedGet(hosts[cfg.Ebay.Environment].finances+"/sell/finances/v1/transaction",
+	return pagedGet(hosts[cfg.EbayCreds().Env].finances+"/sell/finances/v1/transaction",
 		token, url.Values{
 			"filter": {"transactionDate:[" + sinceISO + "..],transactionType:{" + txnType + "}"},
 			"limit":  {"200"},

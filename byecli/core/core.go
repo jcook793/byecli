@@ -55,12 +55,25 @@ func DBPath() string {
 	if p := os.Getenv("BYECLI_DB"); p != "" {
 		return p
 	}
+	return filepath.Join(dataDir(), "byecli.db")
+}
+
+// TestDBPath is the sandbox ledger, kept apart so test-mode syncs never
+// touch the real one. Explicit $BYECLI_DB / --db overrides still win.
+func TestDBPath() string {
+	if p := os.Getenv("BYECLI_DB"); p != "" {
+		return p
+	}
+	return filepath.Join(dataDir(), "byecli-test.db")
+}
+
+func dataDir() string {
 	base := os.Getenv("XDG_DATA_HOME")
 	if base == "" {
 		home, _ := os.UserHomeDir()
 		base = filepath.Join(home, ".local", "share")
 	}
-	return filepath.Join(base, "byecli", "byecli.db")
+	return filepath.Join(base, "byecli")
 }
 
 // ConfigPath resolves the eBay credentials file: $BYECLI_CONFIG wins, then

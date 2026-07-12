@@ -27,22 +27,19 @@ var consentHosts = map[string]string{
 // the config (the RuName comes from the developer portal under User Tokens →
 // Get a Token from eBay via Your Application → OAuth).
 func ConsentURL(cfg *core.Config) (string, error) {
+	creds := cfg.EbayCreds()
 	for name, v := range map[string]string{
-		"client_id": cfg.Ebay.ClientID, "client_secret": cfg.Ebay.ClientSecret,
-		"ru_name": cfg.Ebay.RuName,
+		"client_id": creds.ClientID, "client_secret": creds.ClientSecret,
+		"ru_name": creds.RuName,
 	} {
 		if v == "" || strings.HasPrefix(v, "YOUR-") {
-			return "", fmt.Errorf("fill in %s first", name)
+			return "", fmt.Errorf("fill in %s first", fieldName(cfg, name))
 		}
 	}
-	env := environment(cfg)
-	if _, ok := consentHosts[env]; !ok {
-		return "", fmt.Errorf("environment must be production or sandbox")
-	}
-	return consentHosts[env] + "/oauth2/authorize?" + url.Values{
-		"client_id":     {cfg.Ebay.ClientID},
+	return consentHosts[creds.Env] + "/oauth2/authorize?" + url.Values{
+		"client_id":     {creds.ClientID},
 		"response_type": {"code"},
-		"redirect_uri":  {cfg.Ebay.RuName},
+		"redirect_uri":  {creds.RuName},
 		"scope":         {scopes},
 	}.Encode(), nil
 }
@@ -55,15 +52,16 @@ func ExchangeAuthCode(cfg *core.Config, pasted string) (int, error) {
 	if code == "" {
 		return 0, fmt.Errorf("that didn't contain an auth code")
 	}
+	creds := cfg.EbayCreds()
 	form := url.Values{
 		"grant_type":   {"authorization_code"},
 		"code":         {code},
-		"redirect_uri": {cfg.Ebay.RuName},
+		"redirect_uri": {creds.RuName},
 	}
 	req, _ := http.NewRequest("POST",
-		hosts[environment(cfg)].auth+"/identity/v1/oauth2/token",
+		hosts[creds.Env].auth+"/identity/v1/oauth2/token",
 		strings.NewReader(form.Encode()))
-	req.SetBasicAuth(cfg.Ebay.ClientID, cfg.Ebay.ClientSecret)
+	req.SetBasicAuth(creds.ClientID, creds.ClientSecret)
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	resp, err := httpClient.Do(req)
 	if err != nil {
@@ -81,18 +79,11 @@ func ExchangeAuthCode(cfg *core.Config, pasted string) (int, error) {
 	if err := json.Unmarshal(body, &tokens); err != nil || tokens.RefreshToken == "" {
 		return 0, fmt.Errorf("token response made no sense: %s", trim(body))
 	}
-	cfg.Ebay.RefreshToken = tokens.RefreshToken
+	cfg.SetRefreshToken(tokens.RefreshToken)
 	if err := cfg.Save(); err != nil {
 		return 0, err
 	}
 	return tokens.ExpiresIn / 86400, nil
-}
-
-func environment(cfg *core.Config) string {
-	if cfg.Ebay.Environment == "" {
-		return "production"
-	}
-	return cfg.Ebay.Environment
 }
 
 // parseAuthCode digs the ?code= out of the pasted redirect URL; a bare code

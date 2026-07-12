@@ -243,6 +243,43 @@ func TestAuthFromSettings(t *testing.T) {
 	}
 }
 
+func TestTestModeToggle(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.json")
+	t.Setenv("BYECLI_CONFIG", path)
+
+	m := seededModel(t)
+	if m.testMode {
+		t.Fatal("test mode on with empty config")
+	}
+	mm, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("s")})
+	m = mm.(*Model)
+	if settingFields[m.setCursor].label != "test_mode" {
+		t.Fatalf("cursor not on test_mode: %s", settingFields[m.setCursor].label)
+	}
+	mm, _ = m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	m = mm.(*Model)
+	if m.setEditing {
+		t.Fatal("toggle opened a text editor")
+	}
+	if !m.testMode || !strings.Contains(m.notice, "TEST MODE ON") {
+		t.Fatalf("toggle: testMode=%v notice=%q", m.testMode, m.notice)
+	}
+	var saved map[string]any
+	raw, _ := os.ReadFile(path)
+	json.Unmarshal(raw, &saved)
+	if saved["test_mode"] != true {
+		t.Fatalf("not saved: %v", saved)
+	}
+	if !strings.Contains(m.View(), "TEST") {
+		t.Error("footer badge missing")
+	}
+	mm, _ = m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	m = mm.(*Model)
+	if m.testMode || !strings.Contains(m.notice, "TEST MODE OFF") {
+		t.Fatalf("toggle off: %v %q", m.testMode, m.notice)
+	}
+}
+
 func TestPhosphorToggle(t *testing.T) {
 	m := seededModel(t)
 	mm, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("p")})

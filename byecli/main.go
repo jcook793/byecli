@@ -27,6 +27,13 @@ func main() {
 		return
 	}
 
+	// test mode gets its own ledger so sandbox syncs never touch the real
+	// one; an explicit --db or $BYECLI_DB still wins
+	if cfg, err := core.LoadConfig(); err == nil && cfg.TestMode &&
+		*dbPath == core.DBPath() {
+		*dbPath = core.TestDBPath()
+	}
+
 	db, err := core.Connect(*dbPath)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "byecli: can't open %s: %v\n", *dbPath, err)

@@ -60,9 +60,11 @@ Quote and buy in core go through a small provider-agnostic interface
 (address + parcel in; rates, label PDF, cost out) so another provider
 can slot in later without touching the TUI or the ledger.
 
-Needs: EasyPost account + `easypost_api_key` in the byecli config,
-package weight/dims fields in the schema, a queue view + ship overlay
-in the TUI.
+Needs: EasyPost account + API key in the byecli config, package
+weight/dims fields in the schema, a queue view + ship overlay in the
+TUI. Groundwork already in: sync captures the buyer's service and
+street-level ship-to, and `test_mode` runs the whole app on test rails
+(eBay sandbox creds, EasyPost test key, separate `byecli-test.db`).
 
 Also in this sprint — ledger correctness, same sync layer:
 

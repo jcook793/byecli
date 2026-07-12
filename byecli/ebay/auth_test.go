@@ -62,8 +62,9 @@ func TestExchangeAuthCode(t *testing.T) {
 	hosts["sandbox"] = hostSet{auth: srv.URL}
 	defer func() { hosts["sandbox"] = orig }()
 
-	cfg := &core.Config{Ebay: core.EbayConfig{Environment: "sandbox",
-		ClientID: "cid", ClientSecret: "sec", RuName: "ru"}}
+	// test mode: sandbox creds, and the token lands in the test slot
+	cfg := &core.Config{TestMode: true, Ebay: core.EbayConfig{
+		TestClientID: "cid", TestClientSecret: "sec", TestRuName: "ru"}}
 	days, err := ExchangeAuthCode(cfg, "https://localhost/accepted?code=v%5E1.1%23abc")
 	if err != nil {
 		t.Fatal(err)
@@ -72,7 +73,10 @@ func TestExchangeAuthCode(t *testing.T) {
 		t.Errorf("days: %d", days)
 	}
 	saved, _ := core.LoadConfig()
-	if saved.Ebay.RefreshToken != "new-tok" {
-		t.Errorf("token not saved: %+v", saved.Ebay)
+	if saved.Ebay.TestRefreshToken != "new-tok" {
+		t.Errorf("token not saved to test slot: %+v", saved.Ebay)
+	}
+	if saved.Ebay.RefreshToken != "" {
+		t.Error("production token touched by sandbox auth")
 	}
 }
