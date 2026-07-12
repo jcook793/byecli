@@ -48,25 +48,25 @@ Also in this sprint — ledger correctness, same sync layer:
   `~/.local/share/byecli/backups/` before each sync, keep the last N.
   Manual fields are the only data eBay can't re-sync.
 
-## 3. Sell-side automation — after shipping works
-
-- **Relist** — auction ended unsold → one-key relist, optionally at a
-  lower price.
-- Maybe someday: Negotiation API: see watcher/interest counts,
-  fire "send offer to interested buyers" from the table.
-- Maybe someday: create listings from scratch, buyer messages.
-
-## 4. Self-sufficient binary
+## 3. Self-sufficient binary
 
 - `byecli auth` — port tools/get_refresh_token.py to a subcommand so
   token renewal (~18 months) doesn't need Python.
 - Config gains `easypost_api_key`; secrets stay in
   `~/.config/byecli/config.json`, never in the repo.
 
-## 5. Distribution — someday
+## 4. Distribution
 
-GitHub remote → goreleaser → Homebrew tap. XDG paths already make the
+goreleaser → GitHub Releases → Homebrew tap. XDG paths already make the
 binary relocatable. VHS demo GIF for the README.
+
+## 5. Sell-side automation
+
+- **Relist** — auction ended unsold → one-key relist, optionally at a
+  lower price.
+- Maybe someday: Negotiation API: see watcher/interest counts,
+  fire "send offer to interested buyers" from the table.
+- Maybe someday: create listings from scratch, buyer messages.
 
 ## Non-goals
 
