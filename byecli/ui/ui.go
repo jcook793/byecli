@@ -29,22 +29,24 @@ const (
 	modeAuth
 )
 
+// money columns pair income with its cost: SALE/COST, SHIP/COST
 const (
 	colItem = iota
 	colType
 	colEnds
-	colCost
 	colSale
-	colShpChg
-	colShpCst
-	colFees
+	colCost     // cost basis
+	colShip     // shipping charged to the buyer
+	colShipDiff // charge minus label: +/-/EVEN, the per-item SHIP PROFIT
+	colFeeD
+	colFeeP
 	colNetD
 	colNetP
 	nCols
 )
 
-var titles = [nCols]string{"ITEM", "TYPE", "ENDS", "COST", "SALE",
-	"SHPCHG", "SHPCST", "FEES", "NET$", "NET%"}
+var titles = [nCols]string{"ITEM", "TYPE", "ENDS", "SALE", "COST",
+	"SHIP", "COST", "FEE$", "FEE%", "NET$", "NET%"}
 
 type Model struct {
 	db      *sql.DB
@@ -144,22 +146,31 @@ func sortNum(it *core.Item, col int) *float64 {
 			return &v
 		}
 		return it.ListingPrice
-	case colShpChg:
+	case colShip:
 		if it.Sold() {
 			v := it.ShippingCharged
 			return &v
 		}
-	case colShpCst:
-		if it.Sold() {
-			v := it.LabelCost
-			return &v
-		}
-	case colFees:
+	case colShipDiff:
+		return it.ShippingProfit
+	case colFeeD:
 		if it.Sold() {
 			v := it.EbayFees
 			return &v
 		}
 		return it.FeesEst
+	case colFeeP:
+		if it.Sold() {
+			if gross := it.SalePrice + it.ShippingCharged; gross > 0 {
+				v := it.EbayFees / gross
+				return &v
+			}
+			return nil
+		}
+		if it.FeesEst != nil && it.ListingPrice != nil && *it.ListingPrice > 0 {
+			v := *it.FeesEst / *it.ListingPrice
+			return &v
+		}
 	case colNetD:
 		if it.NetProfit != nil {
 			return it.NetProfit
@@ -343,11 +354,14 @@ func (m *Model) updateTableKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.syncing = true
 			return m, tea.Batch(m.say("SYNCING…", false), doSync(m.db))
 		}
-	case "1", "2", "3", "4", "5", "6", "7", "8", "9", "0":
-		// number keys sort columns: 1=ITEM … 9=NET$, 0=NET%
-		n, _ := strconv.Atoi(msg.String())
-		if n == 0 {
-			n = 10
+	case "1", "2", "3", "4", "5", "6", "7", "8", "9", "0", "-":
+		// number-row keys sort columns: 1=ITEM … 0=NET$, -=NET%
+		n := 11
+		if msg.String() != "-" {
+			n, _ = strconv.Atoi(msg.String())
+			if n == 0 {
+				n = 10
+			}
 		}
 		m.setSort(n - 1)
 	}

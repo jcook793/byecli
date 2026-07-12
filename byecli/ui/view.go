@@ -2,6 +2,7 @@ package ui
 
 import (
 	"fmt"
+	"math"
 	"os"
 	"strings"
 
@@ -94,16 +95,33 @@ func (m *Model) cells(it *core.Item) [nCols]cell {
 		c[colSale] = cell{"—", p.muted, true}
 	}
 	if it.Sold() {
-		c[colShpChg] = cell{core.Money(&it.ShippingCharged), p.ink, true}
-		c[colShpCst] = cell{core.Money(&it.LabelCost), p.ink, true}
-		c[colFees] = cell{core.Money(&it.EbayFees), p.ink, true}
-	} else {
-		c[colShpChg] = cell{"—", p.muted, true}
-		c[colShpCst] = cell{"—", p.muted, true}
-		if it.FeesEst != nil {
-			c[colFees] = cell{"~" + core.Money(it.FeesEst), p.muted, true}
+		c[colShip] = cell{core.Money(&it.ShippingCharged), p.ink, true}
+		switch d := math.Round(*it.ShippingProfit * 100) / 100; {
+		case d == 0:
+			c[colShipDiff] = cell{"EVEN", p.muted, true}
+		case d > 0:
+			c[colShipDiff] = cell{"+" + core.Money(&d), cGreen, true}
+		default:
+			c[colShipDiff] = cell{core.Money(&d), cRed, true}
+		}
+		c[colFeeD] = cell{core.Money(&it.EbayFees), p.ink, true}
+		if gross := it.SalePrice + it.ShippingCharged; gross > 0 {
+			c[colFeeP] = cell{fmt.Sprintf("%.1f%%", it.EbayFees/gross*100), p.ink, true}
 		} else {
-			c[colFees] = cell{"—", p.muted, true}
+			c[colFeeP] = cell{"—", p.muted, true}
+		}
+	} else {
+		c[colShip] = cell{"—", p.muted, true}
+		c[colShipDiff] = cell{"—", p.muted, true}
+		if it.FeesEst != nil {
+			c[colFeeD] = cell{"~" + core.Money(it.FeesEst), p.muted, true}
+		} else {
+			c[colFeeD] = cell{"—", p.muted, true}
+		}
+		if it.FeesEst != nil && it.ListingPrice != nil && *it.ListingPrice > 0 {
+			c[colFeeP] = cell{fmt.Sprintf("~%.1f%%", *it.FeesEst / *it.ListingPrice*100), p.muted, true}
+		} else {
+			c[colFeeP] = cell{"—", p.muted, true}
 		}
 	}
 	switch {
@@ -288,7 +306,7 @@ func (m *Model) tablePanel() string {
 	for col := 0; col < nCols; col++ {
 		m.colSpans[col] = [2]int{x, x + w[col] + gap}
 		x += w[col] + gap
-		hdr = append(hdr, hdrStyle.Render(padCell(m.headerTitle(col), w[col], col >= colCost)))
+		hdr = append(hdr, hdrStyle.Render(padCell(m.headerTitle(col), w[col], col >= colSale)))
 	}
 	lines := []string{strings.Join(hdr, strings.Repeat(" ", gap))}
 
