@@ -152,7 +152,11 @@ func sortNum(it *core.Item, col int) *float64 {
 			return &v
 		}
 	case colShipDiff:
-		return it.ShippingProfit
+		if it.ShippingProfit == nil {
+			return nil
+		}
+		v := -*it.ShippingProfit // column shows label cost over/under charge
+		return &v
 	case colFeeD:
 		if it.Sold() {
 			v := it.EbayFees

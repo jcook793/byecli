@@ -36,7 +36,7 @@ func TestViewRenders(t *testing.T) {
 	v := m.View()
 	for _, want := range []string{"ITEM", "TYPE", "ENDS ▲", "SALE", "SHIP",
 		"FEE$", "FEE%", "NET$", "NET%", "FLIP", "BYE", "$110.00", "—", "NET",
-		"PENDING", "-$1.94", "14.6%", "EVEN"} {
+		"PENDING", "+$1.94", "14.6%", "EVEN"} {
 		if !strings.Contains(v, want) {
 			t.Errorf("view missing %q", want)
 		}

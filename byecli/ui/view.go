@@ -96,13 +96,15 @@ func (m *Model) cells(it *core.Item) [nCols]cell {
 	}
 	if it.Sold() {
 		c[colShip] = cell{core.Money(&it.ShippingCharged), p.ink, true}
-		switch d := math.Round(*it.ShippingProfit * 100) / 100; {
+		// what the label cost me over/under the buyer's charge: a Pirate
+		// Ship win reads as a green negative
+		switch d := -math.Round(*it.ShippingProfit*100) / 100; {
 		case d == 0:
 			c[colShipDiff] = cell{"EVEN", p.muted, true}
 		case d > 0:
-			c[colShipDiff] = cell{"+" + core.Money(&d), cGreen, true}
+			c[colShipDiff] = cell{"+" + core.Money(&d), cRed, true}
 		default:
-			c[colShipDiff] = cell{core.Money(&d), cRed, true}
+			c[colShipDiff] = cell{core.Money(&d), cGreen, true}
 		}
 		c[colFeeD] = cell{core.Money(&it.EbayFees), p.ink, true}
 		if gross := it.SalePrice + it.ShippingCharged; gross > 0 {
