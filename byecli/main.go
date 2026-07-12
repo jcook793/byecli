@@ -13,10 +13,19 @@ import (
 	"byecli/ui"
 )
 
+// version is stamped by goreleaser at release time.
+var version = "dev"
+
 func main() {
 	dbPath := flag.String("db", core.DBPath(),
 		"sqlite database path (also via $BYECLI_DB)")
+	showVersion := flag.Bool("version", false, "print version and exit")
 	flag.Parse()
+
+	if *showVersion {
+		fmt.Println("byecli " + version)
+		return
+	}
 
 	db, err := core.Connect(*dbPath)
 	if err != nil {

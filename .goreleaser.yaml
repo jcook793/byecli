@@ -1,0 +1,64 @@
+version: 2
+
+project_name: byecli
+
+builds:
+  - dir: byecli
+    binary: byecli
+    env:
+      - CGO_ENABLED=0
+    goos:
+      - darwin
+      - linux
+    goarch:
+      - amd64
+      - arm64
+      - arm
+    goarm:
+      - "6"
+    ignore:
+      - goos: darwin
+        goarch: arm
+    ldflags:
+      - -s -w -X main.version={{.Version}}
+    mod_timestamp: "{{ .CommitTimestamp }}"
+
+archives:
+  - formats: [tar.gz]
+
+nfpms:
+  - package_name: byecli
+    vendor: John Cook
+    homepage: https://github.com/jcook793/byecli
+    maintainer: John Cook <jcook793@gmail.com>
+    description: >-
+      Say goodbye to your stuff. Terminal tracker for eBay decluttering
+      and flips.
+    license: MIT
+    formats:
+      - deb
+      - rpm
+    bindir: /usr/bin
+
+homebrew_casks:
+  - repository:
+      owner: jcook793
+      name: homebrew-tap
+      token: "{{ .Env.HOMEBREW_TAP_GITHUB_TOKEN }}"
+    directory: Casks
+    homepage: https://github.com/jcook793/byecli
+    description: Terminal tracker for eBay decluttering and flips
+    # unsigned binary: strip the quarantine flag so Gatekeeper lets it run
+    hooks:
+      post:
+        install: |
+          if system_command("/usr/bin/xattr", args: ["-h"]).exit_status == 0
+            system_command "/usr/bin/xattr", args: ["-dr", "com.apple.quarantine", "#{staged_path}/byecli"]
+          end
+
+changelog:
+  sort: asc
+  filters:
+    exclude:
+      - "^docs"
+      - "^ci"
