@@ -5,6 +5,14 @@ shipping arbitrage (eBay-calculated shipping vs. purchased labels), exact
 eBay fees, net profit.
 
 ```sh
+brew install --cask jcook793/tap/byecli
+```
+
+Debian/Raspberry Pi (arm64, armv6, amd64) and RPM: grab the package from
+[releases](https://github.com/jcook793/byecli/releases) and
+`sudo apt install ./byecli_*.deb`. Or build from source:
+
+```sh
 cd byecli && go build -o byecli . && ./byecli
 ```
 
