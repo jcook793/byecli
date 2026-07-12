@@ -251,22 +251,34 @@ type Order struct {
 	Buyer struct {
 		Username string `json:"username"`
 	} `json:"buyer"`
-	FulfillmentStartInstructions []struct {
-		ShippingStep struct {
-			ShipTo struct {
-				ContactAddress struct {
-					City            string `json:"city"`
-					StateOrProvince string `json:"stateOrProvince"`
-				} `json:"contactAddress"`
-			} `json:"shipTo"`
-		} `json:"shippingStep"`
-	} `json:"fulfillmentStartInstructions"`
+	FulfillmentStartInstructions []fulfillmentInstruction `json:"fulfillmentStartInstructions"`
 	LineItems []struct {
 		LegacyItemID string  `json:"legacyItemId"`
 		Title        string  `json:"title"`
 		LineItemCost *amount `json:"lineItemCost"`
 		DeliveryCost *amount `json:"deliveryCost"`
 	} `json:"lineItems"`
+}
+
+// fulfillmentInstruction carries what the ship flow needs: the service the
+// buyer paid for (the EasyPost quote has to match or beat it) and the full
+// street-level ship-to for the label.
+type fulfillmentInstruction struct {
+	ShippingStep struct {
+		ShippingCarrierCode string `json:"shippingCarrierCode"`
+		ShippingServiceCode string `json:"shippingServiceCode"`
+		ShipTo              struct {
+			FullName       string `json:"fullName"`
+			ContactAddress struct {
+				AddressLine1    string `json:"addressLine1"`
+				AddressLine2    string `json:"addressLine2"`
+				City            string `json:"city"`
+				StateOrProvince string `json:"stateOrProvince"`
+				PostalCode      string `json:"postalCode"`
+				CountryCode     string `json:"countryCode"`
+			} `json:"contactAddress"`
+		} `json:"shipTo"`
+	} `json:"shippingStep"`
 }
 
 // pagedGet follows 'next' links, feeding each page of JSON to handle.
@@ -465,7 +477,8 @@ func ApplyOrders(db *sql.DB, orders []Order) (Stats, error) {
 			orderMeta["buyer"] = order.Buyer.Username
 		}
 		if len(order.FulfillmentStartInstructions) > 0 {
-			addr := order.FulfillmentStartInstructions[0].ShippingStep.ShipTo.ContactAddress
+			step := order.FulfillmentStartInstructions[0].ShippingStep
+			addr := step.ShipTo.ContactAddress
 			var parts []string
 			for _, p := range []string{addr.City, addr.StateOrProvince} {
 				if p != "" {
@@ -474,6 +487,28 @@ func ApplyOrders(db *sql.DB, orders []Order) (Stats, error) {
 			}
 			if len(parts) > 0 {
 				orderMeta["ship_to"] = strings.Join(parts, ", ")
+			}
+			if step.ShippingServiceCode != "" {
+				orderMeta["ship_service"] = step.ShippingServiceCode
+			}
+			if step.ShippingCarrierCode != "" {
+				orderMeta["ship_carrier"] = step.ShippingCarrierCode
+			}
+			// street-level ship-to, kept only while eBay still returns it
+			// (addresses age out of the API): the label needs all of it
+			if addr.AddressLine1 != "" {
+				full := map[string]string{
+					"name": step.ShipTo.FullName, "street1": addr.AddressLine1,
+					"street2": addr.AddressLine2, "city": addr.City,
+					"state": addr.StateOrProvince, "zip": addr.PostalCode,
+					"country": addr.CountryCode,
+				}
+				for k, v := range full {
+					if v == "" {
+						delete(full, k)
+					}
+				}
+				orderMeta["ship_to_full"] = full
 			}
 		}
 

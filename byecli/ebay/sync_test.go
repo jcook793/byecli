@@ -236,19 +236,16 @@ func TestFetchAndMetaMerge(t *testing.T) {
 	o := mkOrder("ORD-9", "2026-07-10T12:00:00.000Z", "", "5.00",
 		line("444", "Vintage radio", "55.00", ""))
 	o.Buyer.Username = "radiofan99"
-	o.FulfillmentStartInstructions = append(o.FulfillmentStartInstructions,
-		struct {
-			ShippingStep struct {
-				ShipTo struct {
-					ContactAddress struct {
-						City            string `json:"city"`
-						StateOrProvince string `json:"stateOrProvince"`
-					} `json:"contactAddress"`
-				} `json:"shipTo"`
-			} `json:"shippingStep"`
-		}{})
-	o.FulfillmentStartInstructions[0].ShippingStep.ShipTo.ContactAddress.City = "Dayton"
-	o.FulfillmentStartInstructions[0].ShippingStep.ShipTo.ContactAddress.StateOrProvince = "OH"
+	var fi fulfillmentInstruction
+	fi.ShippingStep.ShippingCarrierCode = "USPS"
+	fi.ShippingStep.ShippingServiceCode = "USPSPriority"
+	fi.ShippingStep.ShipTo.FullName = "Radio Fan"
+	fi.ShippingStep.ShipTo.ContactAddress.AddressLine1 = "123 Main St"
+	fi.ShippingStep.ShipTo.ContactAddress.City = "Dayton"
+	fi.ShippingStep.ShipTo.ContactAddress.StateOrProvince = "OH"
+	fi.ShippingStep.ShipTo.ContactAddress.PostalCode = "45402"
+	fi.ShippingStep.ShipTo.ContactAddress.CountryCode = "US"
+	o.FulfillmentStartInstructions = append(o.FulfillmentStartInstructions, fi)
 	if _, err := ApplyOrders(db, []Order{o}); err != nil {
 		t.Fatal(err)
 	}
@@ -257,6 +254,17 @@ func TestFetchAndMetaMerge(t *testing.T) {
 	if meta["watch_count"].(float64) != 7 || meta["bid_count"].(float64) != 3 ||
 		meta["buyer"] != "radiofan99" || meta["ship_to"] != "Dayton, OH" {
 		t.Fatalf("merged meta: %v", meta)
+	}
+	if meta["ship_service"] != "USPSPriority" || meta["ship_carrier"] != "USPS" {
+		t.Fatalf("service codes: %v", meta)
+	}
+	full, _ := meta["ship_to_full"].(map[string]any)
+	if full == nil || full["name"] != "Radio Fan" || full["street1"] != "123 Main St" ||
+		full["zip"] != "45402" || full["country"] != "US" {
+		t.Fatalf("ship_to_full: %v", full)
+	}
+	if _, ok := full["street2"]; ok {
+		t.Error("empty street2 stored")
 	}
 }
 
