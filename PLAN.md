@@ -12,8 +12,12 @@ FLIP/BYE split, shipping arbitrage and net profit stats.
 
 ## 2. Distribution
 
-goreleaser → GitHub Releases → Homebrew tap. XDG paths already make the
-binary relocatable. VHS demo GIF for the README.
+goreleaser → GitHub Releases → Homebrew tap. Same config emits .deb/.rpm
+via nfpms (static binary, no deps) — attached to releases for
+`apt install ./byecli_*.deb` on the Pi; a real signed apt repo only if
+outside users ever want `apt upgrade`. XDG paths already make the binary
+relocatable. GitHub Actions does the work: tests on every push, goreleaser
+on every tag. VHS demo GIF for the README.
 
 ## 3. Settings and auth in the TUI
 
