@@ -10,7 +10,25 @@ Sync listings, orders, exact fees, and eBay-bought label costs into the
 local ledger. Phosphor table, detail overlay, cost basis editing,
 FLIP/BYE split, shipping arbitrage and net profit stats.
 
-## 2. Ship — the core of the sprint
+## 2. Self-sufficient binary
+
+`byecli auth` — port tools/get_refresh_token.py to a subcommand so token
+renewal (~18 months) doesn't need Python. Secrets stay in
+`~/.config/byecli/config.json`, never in the repo.
+
+## 3. Distribution
+
+goreleaser → GitHub Releases → Homebrew tap. XDG paths already make the
+binary relocatable. VHS demo GIF for the README.
+
+## 4. Settings in the TUI
+
+View and edit the config from inside the app — a settings overlay in the
+same phosphor idiom (printer names, sync window, API keys) instead of
+hand-editing `config.json`. The file stays the source of truth; the TUI
+just becomes a friendlier way to touch it.
+
+## 5. Ship — the big sprint
 
 The soup-to-nuts flow, driven from a "to ship" queue (sold, not yet
 shipped, sorted by ship-by date):
@@ -33,8 +51,14 @@ shipped, sorted by ship-by date):
 5. **Confirm** — push tracking to eBay (`createShippingFulfillment`);
    buyer gets the shipped email, item flips to shipped in the queue.
 
-Needs: EasyPost account + API key in the byecli config, package
-weight/dims fields in the schema, a queue view + ship overlay in the TUI.
+Design note: EasyPost is the first shipping integration, not the design.
+Quote and buy in core go through a small provider-agnostic interface
+(address + parcel in; rates, label PDF, cost out) so another provider
+can slot in later without touching the TUI or the ledger.
+
+Needs: EasyPost account + `easypost_api_key` in the byecli config,
+package weight/dims fields in the schema, a queue view + ship overlay
+in the TUI.
 
 Also in this sprint — ledger correctness, same sync layer:
 
@@ -48,19 +72,7 @@ Also in this sprint — ledger correctness, same sync layer:
   `~/.local/share/byecli/backups/` before each sync, keep the last N.
   Manual fields are the only data eBay can't re-sync.
 
-## 3. Self-sufficient binary
-
-- `byecli auth` — port tools/get_refresh_token.py to a subcommand so
-  token renewal (~18 months) doesn't need Python.
-- Config gains `easypost_api_key`; secrets stay in
-  `~/.config/byecli/config.json`, never in the repo.
-
-## 4. Distribution
-
-goreleaser → GitHub Releases → Homebrew tap. XDG paths already make the
-binary relocatable. VHS demo GIF for the README.
-
-## 5. Sell-side automation
+## 6. Sell-side automation
 
 - **Relist** — auction ended unsold → one-key relist, optionally at a
   lower price.
