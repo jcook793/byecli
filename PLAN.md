@@ -10,25 +10,24 @@ Sync listings, orders, exact fees, and eBay-bought label costs into the
 local ledger. Phosphor table, detail overlay, cost basis editing,
 FLIP/BYE split, shipping arbitrage and net profit stats.
 
-## 2. Self-sufficient binary
-
-`byecli auth` — port tools/get_refresh_token.py to a subcommand so token
-renewal (~18 months) doesn't need Python. Secrets stay in
-`~/.config/byecli/config.json`, never in the repo.
-
-## 3. Distribution
+## 2. Distribution
 
 goreleaser → GitHub Releases → Homebrew tap. XDG paths already make the
 binary relocatable. VHS demo GIF for the README.
 
-## 4. Settings in the TUI
+## 3. Settings and auth in the TUI
 
 View and edit the config from inside the app — a settings overlay in the
 same phosphor idiom (printer names, sync window, API keys) instead of
 hand-editing `config.json`. The file stays the source of truth; the TUI
 just becomes a friendlier way to touch it.
 
-## 5. Ship — the big sprint
+Same treatment for credentials: port tools/get_refresh_token.py to a
+`byecli auth` flow so eBay token renewal (~18 months) doesn't need
+Python, and EasyPost auth slots in alongside it when Ship arrives.
+Secrets stay in `~/.config/byecli/config.json`, never in the repo.
+
+## 4. Ship — the big sprint
 
 The soup-to-nuts flow, driven from a "to ship" queue (sold, not yet
 shipped, sorted by ship-by date):
@@ -72,7 +71,7 @@ Also in this sprint — ledger correctness, same sync layer:
   `~/.local/share/byecli/backups/` before each sync, keep the last N.
   Manual fields are the only data eBay can't re-sync.
 
-## 6. Sell-side automation
+## 5. Sell-side automation
 
 - **Relist** — auction ended unsold → one-key relist, optionally at a
   lower price.
