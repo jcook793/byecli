@@ -397,7 +397,10 @@ func FetchLabelCosts(cfg *Config, token, sinceISO string) (map[string]float64, e
 
 // ── db writers (testable with canned payloads) ───────────────────────────
 
-type Stats struct{ New, Updated, Sold, Fees, Labels int }
+type Stats struct {
+	New, Updated, Sold, Fees, Labels int
+	Note                             string // appended to the sync notice
+}
 
 func metaJSON(m map[string]any) *string {
 	if len(m) == 0 {
@@ -645,11 +648,22 @@ func RunSync(db *sql.DB) (Stats, error) {
 	}
 	fees, err := FetchFees(cfg, token, sinceISO)
 	if err != nil {
-		return st, err
+		// the Finances API 500s in sandbox (eBay-side, errorId 135000);
+		// fees and labels just don't exist there, so don't fail the sync
+		if !cfg.TestMode {
+			return st, err
+		}
+		st.Note = "FINANCES DOWN IN SANDBOX · FEES/LABELS SKIPPED"
+		fees = nil
 	}
-	labels, err := FetchLabelCosts(cfg, token, sinceISO)
-	if err != nil {
-		return st, err
+	var labels map[string]float64
+	if st.Note == "" {
+		if labels, err = FetchLabelCosts(cfg, token, sinceISO); err != nil {
+			if !cfg.TestMode {
+				return st, err
+			}
+			st.Note = "FINANCES DOWN IN SANDBOX · LABELS SKIPPED"
+		}
 	}
 	for _, step := range []func() (Stats, error){
 		func() (Stats, error) { return ApplyListings(db, listings) },

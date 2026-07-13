@@ -631,18 +631,23 @@ func (m *Model) settingsPanel() string {
 
 	title := fg(p.bright).Bold(true).Render("SETTINGS")
 	sub := mut.Render(core.ConfigPath())
+	sel := settingFields[m.setCursor]
+	help := ""
+	if sel.help != "" { // where the selected field's value comes from
+		help = fg(cBlue).Render("▸ ") + mut.Render(sel.help) + "\n"
+	}
 	var hint string
 	if m.setEditing {
 		hint = m.keyLine([][2]string{{"enter", "save"}, {"esc", "cancel"}})
 	} else {
 		pairs := [][2]string{{"enter", "edit"}, {"a", "authorize ebay"}}
-		if settingFields[m.setCursor].section == "easypost" {
-			pairs = append(pairs, [2]string{"o", "open api keys page"})
+		if sel.link != "" {
+			pairs = append(pairs, [2]string{"o", "open that page"})
 		}
 		hint = m.keyLine(append(pairs, [2]string{"esc", "close"}))
 	}
 	return m.panelStyle().Render(title + "\n" + sub + "\n\n" +
-		strings.Join(lines, "\n") + "\n\n" + hint)
+		strings.Join(lines, "\n") + "\n\n" + help + hint)
 }
 
 // wrapChunks hard-wraps s into w-rune lines (consent URLs run long).
@@ -695,8 +700,10 @@ func (m *Model) authIntroPanel() string {
 	}
 	if m.cfg.TestMode {
 		lines = append(lines,
-			mut.Render("Test mode is on: this flow uses the sandbox keyset — the"),
-			mut.Render("test_* fields in settings, from the Sandbox side of the portal."),
+			fg(cTape).Render("Test mode is on: this uses the SANDBOX keyset (the test_*"),
+			fg(cTape).Render("fields). Sign in as a SANDBOX TEST USER — your real eBay"),
+			fg(cTape).Render("login will not work on the sandbox consent page. Create one"),
+			fg(cTape).Render("under Sandbox → Register a new sandbox user on the portal."),
 			"")
 	}
 	if keysOK && ruOK {

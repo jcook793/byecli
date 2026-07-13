@@ -9,6 +9,9 @@ import (
 	"math"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
+	"strings"
 	"testing"
 
 	"byecli/core"
@@ -267,6 +270,44 @@ func TestFetchAndMetaMerge(t *testing.T) {
 	}
 	if _, ok := full["street2"]; ok {
 		t.Error("empty street2 stored")
+	}
+}
+
+// The Finances API 500s in eBay's sandbox (errorId 135000, their side).
+// In test mode the sync shrugs and skips fees/labels; in production the
+// same failure is fatal.
+func TestSandboxToleratesFinancesOutage(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.json")
+	t.Setenv("BYECLI_CONFIG", path)
+	os.WriteFile(path, []byte(`{"test_mode": true, "ebay": {
+		"test_client_id": "cid", "test_client_secret": "sec",
+		"test_refresh_token": "rt"}}`), 0o600)
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case strings.Contains(r.URL.Path, "oauth2/token"):
+			w.Write([]byte(`{"access_token": "tok"}`))
+		case strings.Contains(r.URL.Path, "ws/api.dll"):
+			w.Write([]byte(`<GetMyeBaySellingResponse><Ack>Success</Ack></GetMyeBaySellingResponse>`))
+		case strings.Contains(r.URL.Path, "fulfillment"):
+			w.Write([]byte(`{"orders": []}`))
+		default: // finances
+			w.WriteHeader(500)
+			w.Write([]byte(`{"errors":[{"errorId":135000}]}`))
+		}
+	}))
+	defer srv.Close()
+	orig := hosts["sandbox"]
+	hosts["sandbox"] = hostSet{auth: srv.URL, api: srv.URL, finances: srv.URL, trading: srv.URL + "/ws/api.dll"}
+	defer func() { hosts["sandbox"] = orig }()
+
+	db := testDB(t)
+	st, err := RunSync(db)
+	if err != nil {
+		t.Fatalf("sandbox sync failed on finances outage: %v", err)
+	}
+	if !strings.Contains(st.Note, "SANDBOX") {
+		t.Fatalf("no skip note: %+v", st)
 	}
 }
 

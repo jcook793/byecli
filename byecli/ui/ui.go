@@ -277,9 +277,13 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, m.say(msg.err.Error(), true)
 		}
 		m.reload()
-		return m, m.say(fmt.Sprintf("SYNCED · %d NEW · %d PRICE · %d SOLD · %d FEES · %d LABELS",
+		notice := fmt.Sprintf("SYNCED · %d NEW · %d PRICE · %d SOLD · %d FEES · %d LABELS",
 			msg.stats.New, msg.stats.Updated, msg.stats.Sold, msg.stats.Fees,
-			msg.stats.Labels), false)
+			msg.stats.Labels)
+		if msg.stats.Note != "" {
+			notice += " · " + msg.stats.Note
+		}
+		return m, m.say(notice, false)
 	case clearNoticeMsg:
 		m.notice = ""
 		return m, nil
@@ -443,61 +447,88 @@ func (m *Model) updateCostKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 
 // ── settings overlay ─────────────────────────────────────────────────────
 
-const easypostKeysURL = "https://www.easypost.com/account/api-keys"
+const (
+	easypostKeysURL = "https://www.easypost.com/account/api-keys"
+	ebayKeysURL     = "https://developer.ebay.com/my/keys"
+	ebayAuthProdURL = "https://developer.ebay.com/my/auth/?env=production&index=0"
+	ebayAuthSandURL = "https://developer.ebay.com/my/auth/?env=sandbox&index=0"
+	ebaySandUserURL = "https://developer.ebay.com/my/sandbox/user"
+)
 
 // settingField maps one config.json key onto the overlay: which section it
-// renders under, how to read and write it (with validation), and whether the
-// list hides its value.
+// renders under, how to read and write it (with validation), whether the
+// list hides its value, and where its value comes from (help shows for the
+// selected field; o opens link).
 type settingField struct {
 	section string // config.json section header
 	label   string // the json key, so the overlay and the file speak alike
 	empty   string // shown when unset
 	secret  bool
+	help    string
+	link    string
 	get     func(c *core.Config) string
 	set     func(c *core.Config, v string) error
 }
 
 var settingFields = []settingField{
-	{"general", "test_mode", "off · enter toggles", false,
-		func(c *core.Config) string {
+	{section: "general", label: "test_mode", empty: "off · enter toggles",
+		help: "eBay sandbox + EasyPost test key + byecli-test.db, all at once.",
+		get: func(c *core.Config) string {
 			if c.TestMode {
 				return "ON"
 			}
 			return ""
-		},
-		nil}, // enter toggles it in place; set is never called
-	{"ebay", "client_id", "<NOT SET>", false,
-		func(c *core.Config) string { return c.Ebay.ClientID },
-		func(c *core.Config, v string) error { c.Ebay.ClientID = v; return nil }},
-	{"ebay", "client_secret", "<NOT SET>", true,
-		func(c *core.Config) string { return c.Ebay.ClientSecret },
-		func(c *core.Config, v string) error { c.Ebay.ClientSecret = v; return nil }},
-	{"ebay", "ru_name", "<NOT SET>", false,
-		func(c *core.Config) string { return c.Ebay.RuName },
-		func(c *core.Config, v string) error { c.Ebay.RuName = v; return nil }},
-	{"ebay", "refresh_token", "<NOT SET> · press a to authorize", true,
-		func(c *core.Config) string { return c.Ebay.RefreshToken },
-		func(c *core.Config, v string) error { c.Ebay.RefreshToken = v; return nil }},
-	{"ebay", "test_client_id", "<NOT SET>", false,
-		func(c *core.Config) string { return c.Ebay.TestClientID },
-		func(c *core.Config, v string) error { c.Ebay.TestClientID = v; return nil }},
-	{"ebay", "test_client_secret", "<NOT SET>", true,
-		func(c *core.Config) string { return c.Ebay.TestClientSecret },
-		func(c *core.Config, v string) error { c.Ebay.TestClientSecret = v; return nil }},
-	{"ebay", "test_ru_name", "<NOT SET>", false,
-		func(c *core.Config) string { return c.Ebay.TestRuName },
-		func(c *core.Config, v string) error { c.Ebay.TestRuName = v; return nil }},
-	{"ebay", "test_refresh_token", "<NOT SET> · a while test_mode is on", true,
-		func(c *core.Config) string { return c.Ebay.TestRefreshToken },
-		func(c *core.Config, v string) error { c.Ebay.TestRefreshToken = v; return nil }},
-	{"ebay", "sync_days", "90 (default)", false,
-		func(c *core.Config) string {
+		}}, // enter toggles it in place; set is never called
+	{section: "ebay", label: "client_id", empty: "<NOT SET>",
+		help: "developer.ebay.com → Application Keys → PRODUCTION column → App ID.",
+		link: ebayKeysURL,
+		get:  func(c *core.Config) string { return c.Ebay.ClientID },
+		set:  func(c *core.Config, v string) error { c.Ebay.ClientID = v; return nil }},
+	{section: "ebay", label: "client_secret", empty: "<NOT SET>", secret: true,
+		help: "Same row of the Application Keys page → Cert ID.",
+		link: ebayKeysURL,
+		get:  func(c *core.Config) string { return c.Ebay.ClientSecret },
+		set:  func(c *core.Config, v string) error { c.Ebay.ClientSecret = v; return nil }},
+	{section: "ebay", label: "ru_name", empty: "<NOT SET>",
+		help: "User Tokens (production) → Get a Token via Your App → OAuth → RuName.",
+		link: ebayAuthProdURL,
+		get:  func(c *core.Config) string { return c.Ebay.RuName },
+		set:  func(c *core.Config, v string) error { c.Ebay.RuName = v; return nil }},
+	{section: "ebay", label: "refresh_token", secret: true,
+		empty: "<NOT SET> · press a to authorize",
+		help:  "Minted by the a flow — nothing to look up or paste by hand.",
+		get:   func(c *core.Config) string { return c.Ebay.RefreshToken },
+		set:   func(c *core.Config, v string) error { c.Ebay.RefreshToken = v; return nil }},
+	{section: "ebay", label: "test_client_id", empty: "<NOT SET>",
+		help: "Application Keys page again — the SANDBOX column this time → App ID.",
+		link: ebayKeysURL,
+		get:  func(c *core.Config) string { return c.Ebay.TestClientID },
+		set:  func(c *core.Config, v string) error { c.Ebay.TestClientID = v; return nil }},
+	{section: "ebay", label: "test_client_secret", empty: "<NOT SET>", secret: true,
+		help: "SANDBOX column of the Application Keys page → Cert ID.",
+		link: ebayKeysURL,
+		get:  func(c *core.Config) string { return c.Ebay.TestClientSecret },
+		set:  func(c *core.Config, v string) error { c.Ebay.TestClientSecret = v; return nil }},
+	{section: "ebay", label: "test_ru_name", empty: "<NOT SET>",
+		help: "User Tokens with env=SANDBOX → OAuth → RuName (separate from prod).",
+		link: ebayAuthSandURL,
+		get:  func(c *core.Config) string { return c.Ebay.TestRuName },
+		set:  func(c *core.Config, v string) error { c.Ebay.TestRuName = v; return nil }},
+	{section: "ebay", label: "test_refresh_token", secret: true,
+		empty: "<NOT SET> · a while test_mode is on",
+		help:  "a flow with test_mode ON — sign in as a SANDBOX TEST USER (o creates one).",
+		link:  ebaySandUserURL,
+		get:   func(c *core.Config) string { return c.Ebay.TestRefreshToken },
+		set:   func(c *core.Config, v string) error { c.Ebay.TestRefreshToken = v; return nil }},
+	{section: "ebay", label: "sync_days", empty: "90 (default)",
+		help: "How far back sync looks for orders, fees, and labels.",
+		get: func(c *core.Config) string {
 			if c.Ebay.SyncDays == 0 {
 				return ""
 			}
 			return strconv.Itoa(c.Ebay.SyncDays)
 		},
-		func(c *core.Config, v string) error {
+		set: func(c *core.Config, v string) error {
 			if v == "" {
 				c.Ebay.SyncDays = 0
 				return nil
@@ -509,20 +540,26 @@ var settingFields = []settingField{
 			c.Ebay.SyncDays = n
 			return nil
 		}},
-	{"easypost", "api_key",
-		"<NOT SET> · " + hyperlink(easypostKeysURL,
-			"easypost.com/account/api-keys"), true,
-		func(c *core.Config) string { return c.EasyPost.APIKey },
-		func(c *core.Config, v string) error { c.EasyPost.APIKey = v; return nil }},
-	{"easypost", "test_api_key", "<NOT SET> · the EZTK… one", true,
-		func(c *core.Config) string { return c.EasyPost.TestAPIKey },
-		func(c *core.Config, v string) error { c.EasyPost.TestAPIKey = v; return nil }},
-	{"printers", "label", "<NOT SET>", false,
-		func(c *core.Config) string { return c.Printers.Label },
-		func(c *core.Config, v string) error { c.Printers.Label = v; return nil }},
-	{"printers", "packing_slip", "<NOT SET>", false,
-		func(c *core.Config) string { return c.Printers.PackingSlip },
-		func(c *core.Config, v string) error { c.Printers.PackingSlip = v; return nil }},
+	{section: "easypost", label: "api_key", secret: true,
+		empty: "<NOT SET> · " + hyperlink(easypostKeysURL, "easypost.com/account/api-keys"),
+		help:  "easypost.com → Account Settings → API Keys → the production EZAK… key.",
+		link:  easypostKeysURL,
+		get:   func(c *core.Config) string { return c.EasyPost.APIKey },
+		set:   func(c *core.Config, v string) error { c.EasyPost.APIKey = v; return nil }},
+	{section: "easypost", label: "test_api_key", secret: true,
+		empty: "<NOT SET> · the EZTK… one",
+		help:  "Same API Keys page → the test EZTK… key.",
+		link:  easypostKeysURL,
+		get:   func(c *core.Config) string { return c.EasyPost.TestAPIKey },
+		set:   func(c *core.Config, v string) error { c.EasyPost.TestAPIKey = v; return nil }},
+	{section: "printers", label: "label", empty: "<NOT SET>",
+		help: "CUPS queue name for the 4×6 thermal printer (lpstat -p lists them).",
+		get:  func(c *core.Config) string { return c.Printers.Label },
+		set:  func(c *core.Config, v string) error { c.Printers.Label = v; return nil }},
+	{section: "printers", label: "packing_slip", empty: "<NOT SET>",
+		help: "CUPS queue name for the full-page laser printer.",
+		get:  func(c *core.Config) string { return c.Printers.PackingSlip },
+		set:  func(c *core.Config, v string) error { c.Printers.PackingSlip = v; return nil }},
 }
 
 func (m *Model) updateSettingsKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
@@ -586,9 +623,9 @@ func (m *Model) updateSettingsKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.authURL = "" // instructions first; consent URL built on continue
 		m.mode = modeAuth
 	case "o":
-		if settingFields[m.setCursor].section == "easypost" {
-			openURL(easypostKeysURL)
-			return m, m.say("OPENED "+easypostKeysURL, false)
+		if u := settingFields[m.setCursor].link; u != "" {
+			openURL(u)
+			return m, m.say("OPENED "+u, false)
 		}
 	}
 	return m, nil
