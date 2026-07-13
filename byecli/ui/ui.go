@@ -6,6 +6,7 @@ import (
 	"database/sql"
 	"fmt"
 	"os/exec"
+	"path/filepath"
 	"runtime"
 	"sort"
 	"strconv"
@@ -68,6 +69,7 @@ type Model struct {
 
 	cfg        *core.Config // loaded when the settings overlay opens
 	testMode   bool         // mirrored from config for the footer badge
+	autoDB     bool         // db path wasn't overridden: toggle may swap it
 	setCursor  int
 	setEditing bool
 	setInput   textinput.Model
@@ -82,14 +84,17 @@ type Model struct {
 	err       error
 }
 
-func New(db *sql.DB) *Model {
+// New builds the model. autoDB says the db path was auto-chosen (no --db or
+// $BYECLI_DB), so the test_mode toggle is allowed to hot-swap ledgers.
+func New(db *sql.DB, autoDB bool) *Model {
 	ti := textinput.New()
 	ti.Placeholder = "0.00"
 	ti.CharLimit = 10
 	ti.Width = 12
 	si := textinput.New()
 	si.Width = 44 // refresh tokens run long; CharLimit stays unlimited
-	m := &Model{db: db, sortCol: colEnds, sortDir: 1, costInput: ti, setInput: si}
+	m := &Model{db: db, autoDB: autoDB, sortCol: colEnds, sortDir: 1,
+		costInput: ti, setInput: si}
 	if cfg, err := core.LoadConfig(); err == nil {
 		m.testMode = cfg.TestMode
 	}
@@ -598,15 +603,36 @@ func (m *Model) updateSettingsKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case "enter":
 		f := settingFields[m.setCursor]
 		if f.label == "test_mode" { // a switch, not a text field
+			if m.syncing {
+				return m, m.say("SYNC IN FLIGHT — TOGGLE AFTER IT FINISHES", true)
+			}
 			m.cfg.TestMode = !m.cfg.TestMode
 			if err := m.cfg.Save(); err != nil {
+				m.cfg.TestMode = !m.cfg.TestMode
 				return m, m.say(strings.ToUpper(err.Error()), true)
 			}
 			m.testMode = m.cfg.TestMode
+			state := "OFF"
 			if m.testMode {
-				return m, m.say("TEST MODE ON · RESTART TO SWITCH TO THE TEST DB", false)
+				state = "ON"
 			}
-			return m, m.say("TEST MODE OFF · RESTART TO SWITCH TO THE REAL DB", false)
+			if !m.autoDB {
+				return m, m.say("TEST MODE "+state+" · KEEPING THE --db/$BYECLI_DB OVERRIDE", false)
+			}
+			// hot-swap onto the matching ledger so the next sync can't
+			// land in the wrong one
+			path := core.DBPath()
+			if m.testMode {
+				path = core.TestDBPath()
+			}
+			db, err := core.Connect(path)
+			if err != nil {
+				return m, m.say(strings.ToUpper(err.Error()), true)
+			}
+			m.db.Close()
+			m.db = db
+			m.reload()
+			return m, m.say("TEST MODE "+state+" · SWITCHED TO "+filepath.Base(path), false)
 		}
 		m.setEditing = true
 		m.setInput.Placeholder = ""

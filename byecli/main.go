@@ -28,9 +28,10 @@ func main() {
 	}
 
 	// test mode gets its own ledger so sandbox syncs never touch the real
-	// one; an explicit --db or $BYECLI_DB still wins
-	if cfg, err := core.LoadConfig(); err == nil && cfg.TestMode &&
-		*dbPath == core.DBPath() {
+	// one; an explicit --db or $BYECLI_DB still wins (and pins the db —
+	// the settings toggle won't swap away from an explicit choice)
+	autoDB := os.Getenv("BYECLI_DB") == "" && *dbPath == core.DBPath()
+	if cfg, err := core.LoadConfig(); err == nil && cfg.TestMode && autoDB {
 		*dbPath = core.TestDBPath()
 	}
 
@@ -44,7 +45,7 @@ func main() {
 	ui.SetTerminalBG(false) // green phosphor bg; restored on the way out
 	defer ui.ResetTerminalBG()
 
-	p := tea.NewProgram(ui.New(db), tea.WithAltScreen(), tea.WithMouseCellMotion())
+	p := tea.NewProgram(ui.New(db, autoDB), tea.WithAltScreen(), tea.WithMouseCellMotion())
 	if _, err := p.Run(); err != nil {
 		ui.ResetTerminalBG()
 		fmt.Fprintf(os.Stderr, "byecli: %v\n", err)

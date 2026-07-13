@@ -70,8 +70,9 @@ bought through eBay; a hand-entered label cost always wins over the synced one.
 eBay sandbox credentials (the `test_*` fields — sandbox keys and RuName
 come from the Sandbox side of the developer portal), the EasyPost test
 key (`EZTK…`), and a separate database (`byecli-test.db`) so sandbox
-syncs never touch the real ledger. The footer shows a TEST badge while
-it's on; restart after toggling so the database switch takes effect.
+syncs never touch the real ledger — the toggle swaps ledgers on the spot
+(an explicit `--db`/`$BYECLI_DB` stays pinned). The footer shows a TEST
+badge while it's on.
 
 ## Notes
 

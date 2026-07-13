@@ -26,7 +26,7 @@ func seededModel(t *testing.T) *Model {
 		('Active bye thing with a very long name that will need cropping somewhere', 'declutter', 0, '2026-07-03', NULL, 0, 0, 0, 0, 25.0, '2026-07-12T01:02:03.000Z', '222'),
 		('Even steven', 'declutter', 0, '2026-07-02', '2026-07-10', 20, 8, 8, 3.12, NULL, NULL, '555'),
 		('Unlisted mystery', 'declutter', 0, NULL, NULL, 0, 0, 0, 0, NULL, NULL, NULL)`)
-	m := New(db)
+	m := New(db, false)
 	mm, _ := m.Update(tea.WindowSizeMsg{Width: 140, Height: 40})
 	return mm.(*Model)
 }
@@ -244,10 +244,14 @@ func TestAuthFromSettings(t *testing.T) {
 }
 
 func TestTestModeToggle(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "config.json")
-	t.Setenv("BYECLI_CONFIG", path)
+	dir := t.TempDir()
+	t.Setenv("BYECLI_CONFIG", filepath.Join(dir, "config.json"))
+	// pin the db swap inside the temp dir; autoDB below exercises the swap
+	t.Setenv("BYECLI_DB", filepath.Join(dir, "toggle.db"))
+	path := filepath.Join(dir, "config.json")
 
 	m := seededModel(t)
+	m.autoDB = true
 	if m.testMode {
 		t.Fatal("test mode on with empty config")
 	}
@@ -261,7 +265,8 @@ func TestTestModeToggle(t *testing.T) {
 	if m.setEditing {
 		t.Fatal("toggle opened a text editor")
 	}
-	if !m.testMode || !strings.Contains(m.notice, "TEST MODE ON") {
+	if !m.testMode || !strings.Contains(m.notice, "TEST MODE ON") ||
+		!strings.Contains(m.notice, "SWITCHED TO") {
 		t.Fatalf("toggle: testMode=%v notice=%q", m.testMode, m.notice)
 	}
 	var saved map[string]any
